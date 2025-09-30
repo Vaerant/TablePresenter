@@ -1,0 +1,43 @@
+{
+  "name": "table-quote-presenter-electron",
+  "version": "1.0.0",
+  "description": "Electron wrapper for Next.js sermon presenter app",
+  "main": "main.js",
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0",
+    "e-dev": "concurrently -n \"NEXT,ELECTRON\" -c \"yellow,blue\" --kill-others \"next dev\" \"electron .\"",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0",
+    "lint": "next lint",
+    "electron": "electron .",
+    "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron-pack": "next build && electron-builder"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/react": "19.1.13",
+    "concurrently": "^7.6.0",
+    "electron": "32.0.0",
+    "typescript": "5.9.2",
+    "wait-on": "^7.0.1"
+  },
+  "dependencies": {
+    "autoprefixer": "^10.4.21",
+    "better-sqlite3": "^8.7.0",
+    "electron-serve": "^3.0.0",
+    "next": "^13.0.0",
+    "postcss": "^8.5.6",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "react-icons": "^5.5.0",
+    "tailwindcss": "^4.1.13",
+    "ws": "^8.18.3",
+    "zustand": "^5.0.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "electron"
+    ]
+  }
+}
