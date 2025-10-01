@@ -45,5 +45,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
         getNetworkInfo: () => ipcRenderer.invoke('system:getNetworkInfo'),
         getConnectionCount: () => ipcRenderer.invoke('system:getConnectionCount'),
         openExternal: (url) => ipcRenderer.invoke('system:openExternal', url)
+    },
+
+    // Template API
+    template: {
+        checkTemplate: (stage) => ipcRenderer.invoke('template:checkTemplate', stage),
+        getTemplate: (stage) => ipcRenderer.invoke('template:getTemplate', stage),
+        listTemplates: () => ipcRenderer.invoke('template:listTemplates'),
+        createDefault: () => ipcRenderer.invoke('template:createDefault')
     }
 });

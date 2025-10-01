@@ -1,8 +1,12 @@
 import json
 from pymilvus import connections, Collection
+import os
+from dotenv import load_dotenv
 
-CLUSTER_ENDPOINT = "url"
-TOKEN = "url"
+load_dotenv('../../.env')
+
+CLUSTER_ENDPOINT = os.getenv('ZILLIZ_URL')
+TOKEN = os.getenv('ZILLIZ_API_KEY')
 
 connections.connect(
     uri=CLUSTER_ENDPOINT,

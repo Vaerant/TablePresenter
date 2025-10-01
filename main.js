@@ -3,6 +3,7 @@ const path = require("path");
 const http = require("http");
 const WebSocket = require("ws");
 const os = require("os");
+const fs = require('fs').promises;
 
 let appServe = null;
 let sermonDatabase = null;
@@ -96,7 +97,7 @@ const getInterfacePriority = (interfaceName, address) => {
 // Setup HTTP and WebSocket server for browser communication
 const setupWebServer = () => {
   // Create HTTP server
-  httpServer = http.createServer((req, res) => {
+  httpServer = http.createServer(async (req, res) => {
     // Enable CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -116,6 +117,73 @@ const setupWebServer = () => {
         displaySettings: currentDisplaySettings
       };
       res.end(JSON.stringify(responseData));
+    } else if (req.url.startsWith('/templates/')) {
+      // Serve template files
+      try {
+        const urlPath = req.url.replace('/templates/', '');
+        
+        // If requesting the main HTML file, inject CSS and JS
+        if (urlPath.endsWith('/index.html')) {
+          const stage = urlPath.split('/')[0];
+          const templateDir = path.join(__dirname, 'templates', stage);
+          const indexPath = path.join(templateDir, 'index.html');
+          const cssPath = path.join(templateDir, 'styles.css');
+          const jsPath = path.join(templateDir, 'script.js');
+          
+          let htmlContent = await fs.readFile(indexPath, 'utf8');
+          
+          // Try to inject CSS
+          try {
+            const cssContent = await fs.readFile(cssPath, 'utf8');
+            if (htmlContent.includes('</head>')) {
+              htmlContent = htmlContent.replace('</head>', `<style>\n${cssContent}\n</style>\n</head>`);
+            } else {
+              htmlContent = htmlContent.replace('<html>', `<html><head><style>\n${cssContent}\n</style></head>`);
+            }
+          } catch (error) {
+            console.log('No CSS file found for template:', stage);
+          }
+          
+          // Try to inject JS
+          try {
+            const jsContent = await fs.readFile(jsPath, 'utf8');
+            if (htmlContent.includes('</body>')) {
+              htmlContent = htmlContent.replace('</body>', `<script>\n${jsContent}\n</script>\n</body>`);
+            } else {
+              htmlContent += `<script>\n${jsContent}\n</script>`;
+            }
+          } catch (error) {
+            console.log('No JS file found for template:', stage);
+          }
+          
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(htmlContent);
+        } else {
+          // Serve other files (CSS, JS, images, etc.) directly
+          const templatePath = path.join(__dirname, 'templates', urlPath);
+          
+          // Check if file exists
+          await fs.access(templatePath);
+          
+          // Determine content type
+          let contentType = 'text/plain';
+          if (templatePath.endsWith('.html')) contentType = 'text/html';
+          else if (templatePath.endsWith('.css')) contentType = 'text/css';
+          else if (templatePath.endsWith('.js')) contentType = 'application/javascript';
+          else if (templatePath.endsWith('.png')) contentType = 'image/png';
+          else if (templatePath.endsWith('.jpg') || templatePath.endsWith('.jpeg')) contentType = 'image/jpeg';
+          else if (templatePath.endsWith('.gif')) contentType = 'image/gif';
+          else if (templatePath.endsWith('.svg')) contentType = 'image/svg+xml';
+          
+          const content = await fs.readFile(templatePath);
+          res.writeHead(200, { 'Content-Type': contentType });
+          res.end(content);
+        }
+      } catch (error) {
+        console.error('Template file not found:', error.message);
+        res.writeHead(404);
+        res.end('Template not found');
+      }
     } else {
       res.writeHead(404);
       res.end('Not Found');
@@ -472,6 +540,433 @@ const setupSystemHandlers = () => {
   });
 };
 
+// Template handlers - simplify these since we're serving files directly via HTTP
+const setupTemplateHandlers = () => {
+  ipcMain.handle('template:checkTemplate', async (event, stage) => {
+    try {
+      const templateDir = path.join(__dirname, 'templates', stage);
+      const indexPath = path.join(templateDir, 'index.html');
+      
+      await fs.access(indexPath);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  });
+
+  ipcMain.handle('template:listTemplates', async () => {
+    try {
+      const templatesDir = path.join(__dirname, 'templates');
+      
+      // Create templates directory if it doesn't exist
+      try {
+        await fs.access(templatesDir);
+      } catch (error) {
+        await fs.mkdir(templatesDir, { recursive: true });
+        console.log('Created templates directory:', templatesDir);
+      }
+      
+      const entries = await fs.readdir(templatesDir, { withFileTypes: true });
+      
+      const templates = [];
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const indexPath = path.join(templatesDir, entry.name, 'index.html');
+          try {
+            await fs.access(indexPath);
+            templates.push(entry.name);
+          } catch (error) {
+            // Skip directories without index.html
+          }
+        }
+      }
+      
+      return templates;
+    } catch (error) {
+      console.error('Error listing templates:', error);
+      return [];
+    }
+  });
+
+  // Create default template if templates directory is empty
+  ipcMain.handle('template:createDefault', async () => {
+    try {
+      const templatesDir = path.join(__dirname, 'templates');
+      const defaultDir = path.join(templatesDir, 'default');
+      
+      // Create directories
+      await fs.mkdir(defaultDir, { recursive: true });
+      
+      // Create default HTML
+      const defaultHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Display - Default Template</title>
+</head>
+<body>
+    <div id="app">
+        <div id="header">
+            <h1 id="sermon-title"></h1>
+            <p id="sermon-date"></p>
+        </div>
+        
+        <div id="content">
+            <div id="paragraph-text"></div>
+        </div>
+        
+        <div id="connection-status">
+            <span id="connection-type"></span>
+            <span id="connection-count"></span>
+        </div>
+    </div>
+</body>
+</html>`;
+
+      // Create default CSS
+      const defaultCss = `* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: #000;
+    color: #fff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#app {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 2rem;
+}
+
+#header {
+    text-align: center;
+    margin-bottom: 2rem;
+    flex-shrink: 0;
+}
+
+#sermon-title {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #e5e7eb;
+    margin-bottom: 0.5rem;
+}
+
+#sermon-date {
+    font-size: 1.2rem;
+    color: #9ca3af;
+}
+
+#content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 2rem;
+}
+
+#paragraph-text {
+    font-size: 3rem;
+    line-height: 1.4;
+    text-align: center;
+    max-width: 100%;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+}
+
+.editor-comment {
+    font-style: italic;
+    color: #9ca3af;
+}
+
+#connection-status {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    color: #9ca3af;
+}
+
+.hidden {
+    display: none !important;
+}`;
+
+      // Create default JavaScript
+      const defaultJs = `let currentParagraph = null;
+let currentDisplaySettings = null;
+let connectionType = 'unknown';
+let ws = null;
+let pollInterval = null;
+
+// DOM elements
+const sermonTitle = document.getElementById('sermon-title');
+const sermonDate = document.getElementById('sermon-date');
+const paragraphText = document.getElementById('paragraph-text');
+const connectionStatus = document.getElementById('connection-status');
+const connectionTypeSpan = document.getElementById('connection-type');
+const connectionCountSpan = document.getElementById('connection-count');
+const header = document.getElementById('header');
+const content = document.getElementById('content');
+
+// Initialize the display
+function initialize() {
+    console.log('Initializing default template...');
+    initializeBrowser();
+    updateDisplay();
+}
+
+// Browser initialization
+function initializeBrowser() {
+    const serverHost = window.location.hostname;
+    const wsUrl = \`ws://\${serverHost}:3001\`;
+    const httpUrl = \`http://\${serverHost}:3001/api/current-paragraph\`;
+    
+    console.log('Connecting to:', wsUrl);
+    
+    try {
+        ws = new WebSocket(wsUrl);
+        connectionType = 'websocket';
+        
+        ws.onopen = () => {
+            console.log('WebSocket connected');
+            connectionType = 'websocket-connected';
+            updateConnectionStatus();
+        };
+        
+        ws.onmessage = (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                handleMessage(message);
+            } catch (error) {
+                console.error('Error parsing message:', error);
+            }
+        };
+        
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            fallbackToHttp(httpUrl);
+        };
+        
+        ws.onclose = () => {
+            console.log('WebSocket closed');
+            fallbackToHttp(httpUrl);
+        };
+    } catch (error) {
+        console.error('WebSocket not supported:', error);
+        fallbackToHttp(httpUrl);
+    }
+}
+
+// Handle WebSocket messages
+function handleMessage(message) {
+    console.log('Received message:', message);
+    
+    switch (message.type) {
+        case 'paragraph:updated':
+            if (message.data.paragraphData) {
+                currentParagraph = message.data.paragraphData;
+            }
+            if (message.data.displaySettings) {
+                currentDisplaySettings = message.data.displaySettings;
+            }
+            updateDisplay();
+            break;
+            
+        case 'display:settingsUpdated':
+            currentDisplaySettings = message.data;
+            updateDisplay();
+            break;
+            
+        case 'paragraph:cleared':
+            currentParagraph = null;
+            updateDisplay();
+            break;
+    }
+}
+
+// Fallback to HTTP polling
+function fallbackToHttp(httpUrl) {
+    connectionType = 'http-polling';
+    updateConnectionStatus();
+    
+    // Initial fetch
+    fetchCurrentState(httpUrl);
+    
+    // Poll every second
+    pollInterval = setInterval(() => fetchCurrentState(httpUrl), 1000);
+}
+
+// Fetch current state via HTTP
+async function fetchCurrentState(url) {
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data) {
+            if (data.paragraphData) {
+                currentParagraph = data.paragraphData;
+            } else if (currentParagraph) {
+                currentParagraph = null;
+            }
+            
+            if (data.displaySettings) {
+                currentDisplaySettings = data.displaySettings;
+            }
+            
+            updateDisplay();
+        }
+    } catch (error) {
+        console.error('Error fetching state:', error);
+    }
+}
+
+// Update the display
+function updateDisplay() {
+    const shouldShowContent = currentParagraph && 
+        currentDisplaySettings?.enabled && 
+        currentDisplaySettings?.showContent;
+    
+    const shouldShowTitle = currentParagraph && 
+        currentDisplaySettings?.enabled && 
+        currentDisplaySettings?.showTitle;
+    
+    const shouldShowDate = currentParagraph && 
+        currentDisplaySettings?.enabled && 
+        currentDisplaySettings?.showDate;
+    
+    // Update title
+    if (shouldShowTitle && currentParagraph.sermonTitle) {
+        sermonTitle.textContent = currentParagraph.sermonTitle;
+        sermonTitle.classList.remove('hidden');
+    } else {
+        sermonTitle.classList.add('hidden');
+    }
+    
+    // Update date
+    if (shouldShowDate && currentParagraph.sermonDate) {
+        sermonDate.textContent = currentParagraph.sermonDate;
+        sermonDate.classList.remove('hidden');
+    } else {
+        sermonDate.classList.add('hidden');
+    }
+    
+    // Update content
+    if (shouldShowContent) {
+        renderParagraphContent();
+        content.classList.remove('hidden');
+    } else {
+        content.classList.add('hidden');
+    }
+    
+    // Hide header if nothing to show
+    if (!shouldShowTitle && !shouldShowDate) {
+        header.classList.add('hidden');
+    } else {
+        header.classList.remove('hidden');
+    }
+}
+
+// Render paragraph content
+function renderParagraphContent() {
+    if (!currentParagraph?.paragraph?.orderedBlockIds) {
+        paragraphText.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    currentParagraph.paragraph.orderedBlockIds.forEach(blockId => {
+        const block = currentParagraph.paragraph.blocks[blockId];
+        if (block && block.text) {
+            const className = block.type === 'ed' ? 'editor-comment' : '';
+            html += \`<span class="\${className}">\${escapeHtml(block.text)} </span>\`;
+        }
+    });
+    
+    paragraphText.innerHTML = html;
+    adjustFontSize();
+}
+
+// Adjust font size based on content length
+function adjustFontSize() {
+    const textLength = paragraphText.textContent.length;
+    let fontSize;
+    
+    if (textLength < 30) {
+        fontSize = '4rem';
+    } else if (textLength < 60) {
+        fontSize = '3.5rem';
+    } else if (textLength < 120) {
+        fontSize = '3rem';
+    } else if (textLength < 200) {
+        fontSize = '2.5rem';
+    } else if (textLength < 300) {
+        fontSize = '2rem';
+    } else {
+        fontSize = '1.5rem';
+    }
+    
+    paragraphText.style.fontSize = fontSize;
+}
+
+// Update connection status
+function updateConnectionStatus() {
+    connectionTypeSpan.textContent = connectionType;
+}
+
+// Update connection count
+function updateConnectionCount(count) {
+    connectionCountSpan.textContent = \`Connections: \${count}\`;
+}
+
+// Utility function to escape HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    if (ws) {
+        ws.close();
+    }
+    if (pollInterval) {
+        clearInterval(pollInterval);
+    }
+});
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initialize);
+} else {
+    initialize();
+}`;
+
+      // Write files
+      await fs.writeFile(path.join(defaultDir, 'index.html'), defaultHtml, 'utf8');
+      await fs.writeFile(path.join(defaultDir, 'styles.css'), defaultCss, 'utf8');
+      await fs.writeFile(path.join(defaultDir, 'script.js'), defaultJs, 'utf8');
+      
+      console.log('Created default template in:', defaultDir);
+      return true;
+    } catch (error) {
+      console.error('Error creating default template:', error);
+      return false;
+    }
+  });
+};
+
 const createWindow = async () => {
   try {
     mainWindow = new BrowserWindow({
@@ -522,6 +1017,7 @@ app.on("ready", async () => {
     setupDatabaseHandlers();
     setupParagraphHandlers();
     setupSystemHandlers();
+    setupTemplateHandlers();
     setupWebServer();
     await createWindow();
     console.log('App initialization complete');
