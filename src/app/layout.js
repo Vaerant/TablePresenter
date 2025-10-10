@@ -22,7 +22,7 @@ import { useRouter } from 'next/navigation';
 const TopBarNav = () => {
   const router = useRouter();
   return (
-    <div className="w-full h-12 bg-neutral-900 flex items-center justify-between px-4">
+    <div className="w-full h-[50px] bg-neutral-900 flex items-center justify-between px-4">
       <div className="text-white font-medium">Table Quote Presenter</div>
       <div className="flex items-center gap-4">
         <button
@@ -46,8 +46,8 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className={`h-screen flex flex-col antialiased`}>
-        <TopBarNav />
-        <div className="flex-grow overflow-hidden">
+        {/* <TopBarNav /> */}
+        <div className="flex-grow overflow-hidden" style={{ height: 'calc(100vh - 50px)' }}>
           {children}
         </div>
       </body>

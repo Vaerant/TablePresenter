@@ -22,6 +22,22 @@ html {
   scrollbar-color: #888 #444;
 }
 
+.dark-scroll {
+  scrollbar-color: #333 #111;
+}
+
+.middle-scroll {
+  scrollbar-color: #666 #111;
+}
+
+.thin-scroll {
+  scrollbar-width: thin;
+}
+
+button:focus {
+  outline: none;
+}
+
 nextjs-portal {
   display: none;
 }

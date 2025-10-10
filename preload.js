@@ -32,7 +32,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
         searchVerses: (query, limit) => ipcRenderer.invoke('bible:searchVerses', query, limit),
         searchByBook: (query, bookId, limit) => ipcRenderer.invoke('bible:searchByBook', query, bookId, limit),
         getChapter: (bookId, chapter) => ipcRenderer.invoke('bible:getChapter', bookId, chapter),
-        getVerse: (bookId, chapter, verse) => ipcRenderer.invoke('bible:getVerse', bookId, chapter, verse)
+        getVerse: (bookId, chapter, verse) => ipcRenderer.invoke('bible:getVerse', bookId, chapter, verse),
+        getBook: (bookId) => ipcRenderer.invoke('bible:getBook', bookId)
     },
 
     // Paragraph selection API
@@ -53,5 +54,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
         getTemplate: (stage) => ipcRenderer.invoke('template:getTemplate', stage),
         listTemplates: () => ipcRenderer.invoke('template:listTemplates'),
         createDefault: () => ipcRenderer.invoke('template:createDefault')
+    },
+
+    // Verse API
+    verse: {
+        cleared: () => ipcRenderer.invoke('verse:cleared')
     }
 });

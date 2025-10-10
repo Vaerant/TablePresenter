@@ -217,6 +217,24 @@ const setupWebServer = () => {
       }));
     }
 
+    // Handle incoming messages from templates
+    ws.on('message', (data) => {
+      try {
+        const message = JSON.parse(data);
+        console.log('Received message from template:', message);
+        
+        if (message.type === 'bible:fontSizeFeedback') {
+          // Broadcast font size feedback to all Electron windows
+          const windows = BrowserWindow.getAllWindows();
+          windows.forEach(window => {
+            window.webContents.send('bible:fontSizeFeedback', message.data);
+          });
+        }
+      } catch (error) {
+        console.error('Error parsing message from template:', error);
+      }
+    });
+
     ws.on('close', () => {
       activeConnections--;
       console.log(`Browser disconnected from WebSocket (${activeConnections} active connections)`);
@@ -319,6 +337,30 @@ const broadcastParagraphClear = () => {
       }
     });
     console.log(`Broadcasted clear to ${wss.clients.size} WebSocket clients`);
+  }
+};
+
+const broadcastVerseClear = () => {
+  currentSelectedParagraph = null;
+  
+  // Broadcast to Electron windows
+  const windows = BrowserWindow.getAllWindows();
+  console.log(`Broadcasting verse clear to ${windows.length} Electron windows`);
+  windows.forEach(window => {
+    window.webContents.send('verse:cleared');
+  });
+
+  // Broadcast to WebSocket clients (browsers)
+  if (wss) {
+    const message = JSON.stringify({
+      type: 'verse:cleared'
+    });
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+    console.log(`Broadcasted verse clear to ${wss.clients.size} WebSocket clients`);
   }
 };
 
@@ -476,6 +518,15 @@ const setupDatabaseHandlers = () => {
       throw error;
     }
   });
+
+  ipcMain.handle('bible:getBook', async (event, bookId) => {
+    try {
+      return await bibleDatabase.getBook(bookId);
+    } catch (error) {
+      console.error('Error in getBook:', error);
+      throw error;
+    }
+  });
 };
 
 // Paragraph selection handlers
@@ -493,6 +544,28 @@ const setupParagraphHandlers = () => {
   ipcMain.on('paragraph:cleared', (event) => {
     console.log('Main process received paragraph clear');
     broadcastParagraphClear();
+  });
+
+  // Add verse selection handler
+  ipcMain.on('verse:selected', (event, data) => {
+    console.log('Main process received verse selection:', data);
+    broadcastVerseUpdate(data);
+  });
+
+  // Add verse clear handler
+  ipcMain.on('verse:cleared', (event) => {
+    console.log('Main process received verse clear');
+    broadcastVerseClear();
+  });
+
+  ipcMain.on('bible:displaySettingsUpdated', (event, settings) => {
+    console.log('Main process received Bible display settings update:', settings);
+    broadcastBibleDisplaySettings(settings);
+  });
+
+  ipcMain.on('bible:recalcFontSize', (event) => {
+    console.log('Main process received recalc font size request');
+    broadcastRecalcFontSize();
   });
 
   ipcMain.handle('paragraph:getCurrentSelection', async () => {
@@ -1036,3 +1109,74 @@ app.on("window-all-closed", () => {
         app.quit();
     }
 });
+
+// Broadcast Bible display settings to templates
+const broadcastBibleDisplaySettings = (settings) => {
+  // Broadcast to Electron windows
+  const windows = BrowserWindow.getAllWindows();
+  console.log(`Broadcasting Bible display settings to ${windows.length} Electron windows`);
+  windows.forEach(window => {
+    window.webContents.send('bible:displaySettingsUpdated', settings);
+  });
+
+  // Broadcast to WebSocket clients (browsers)
+  if (wss) {
+    const message = JSON.stringify({
+      type: 'bible:displaySettingsUpdated',
+      data: settings
+    });
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+    console.log(`Broadcasted Bible settings to ${wss.clients.size} WebSocket clients`);
+  }
+};
+
+// Broadcast recalc font size request to templates
+const broadcastRecalcFontSize = () => {
+  // Broadcast to Electron windows
+  const windows = BrowserWindow.getAllWindows();
+  console.log(`Broadcasting recalc font size to ${windows.length} Electron windows`);
+  windows.forEach(window => {
+    window.webContents.send('bible:recalcFontSize');
+  });
+
+  // Broadcast to WebSocket clients (browsers)
+  if (wss) {
+    const message = JSON.stringify({
+      type: 'bible:recalcFontSize'
+    });
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+    console.log(`Broadcasted recalc font size to ${wss.clients.size} WebSocket clients`);
+  }
+};
+
+// Add verse update broadcasting function
+const broadcastVerseUpdate = (data) => {
+  // Broadcast to Electron windows
+  const windows = BrowserWindow.getAllWindows();
+  console.log(`Broadcasting verse update to ${windows.length} Electron windows`);
+  windows.forEach(window => {
+    window.webContents.send('verse:updated', data);
+  });
+
+  // Broadcast to WebSocket clients (browsers)
+  if (wss) {
+    const message = JSON.stringify({
+      type: 'verse:updated',
+      data: data
+    });
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+    console.log(`Broadcasted verse update to ${wss.clients.size} WebSocket clients`);
+  }
+};

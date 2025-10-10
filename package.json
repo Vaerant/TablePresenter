@@ -18,12 +18,13 @@
     "@types/react": "19.1.13",
     "concurrently": "^7.6.0",
     "electron": "32.0.0",
+    "node-gyp": "^11.4.2",
     "typescript": "5.9.2",
     "wait-on": "^7.0.1"
   },
   "dependencies": {
     "autoprefixer": "^10.4.21",
-    "better-sqlite3": "^8.7.0",
+    "better-sqlite3": "^12.4.1",
     "electron-serve": "^3.0.0",
     "next": "^13.0.0",
     "postcss": "^8.5.6",
