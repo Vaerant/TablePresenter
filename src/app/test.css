@@ -1,0 +1,67 @@
+.nav-title {
+  position: relative;
+  display: inline-block;
+  padding: 0 8px;
+}
+
+.nav-title::before,
+.nav-title::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 42px;
+  height: 2px;
+  background: #ffffff;
+  transform: translateY(-50%) scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.45s cubic-bezier(.4,0,.2,1);
+  opacity: 0.85;
+}
+
+.nav-title::before {
+  left: -50px;
+  transform-origin: right center;
+}
+
+.nav-title::after {
+  right: -50px;
+  transform-origin: right center;
+}
+
+.group:hover .nav-title::before,
+.group:hover .nav-title::after {
+  transform: translateY(-50%) scaleX(1);
+}
+
+.nav-title.nav-title--vert::before,
+.nav-title.nav-title--vert::after {
+  /* override horizontal defaults */
+  top: auto;
+  right: auto;
+  left: 50%;
+  width: 2px;
+  height: 20px;
+  background: #ffffff;
+  opacity: 0.9;
+  transform: translateX(-50%) scaleY(0);
+  transform-origin: bottom center; /* reveal bottom -> top */
+  transition: transform 0.45s cubic-bezier(.4,0,.2,1);
+}
+.nav-title.nav-title--vert::after {
+  transform-origin: top center; /* reveal top -> bottom */
+}
+
+.nav-title.nav-title--vert::before {
+  /* line above text */
+  bottom: calc(100% + 10px);
+}
+
+.nav-title.nav-title--vert::after {
+  /* line below text */
+  top: calc(100% + 10px);
+}
+
+.group:hover .nav-title--vert::before,
+.group:hover .nav-title--vert::after {
+  transform: translateX(-50%) scaleY(1);
+}

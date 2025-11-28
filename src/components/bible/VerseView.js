@@ -67,37 +67,38 @@ const VerseView = forwardRef(({ verse, isSelected, onVerseClick }, ref) => {
     onVerseClick(verse, e.ctrlKey || e.metaKey, e.shiftKey);
   };
 
-  const baseClasses = 'inline-block transition-all duration-500';
-  const selectionClasses = `cursor-pointer select-none p-2 px-3 border-l-0 ${
-    isHighlighted
-      ? `rounded ${fadeState === 'visible' ? 'border-neutral-700 border-l-8 !rounded-l-none' : fadeState === 'fading' ? 'border-neutral-900' : 'border-transparent'}`
-      : isSelected 
+  const baseClasses = 'inline-block duration-500';
+  const selectionClasses = `cursor-pointer select-none px-3 border-l-0 transition-none ${
+    isSelected 
         ? 'bg-blue-600/10 bg-opacity-30 rounded hover:bg-blue-600/20 border-transparent'
         : 'hover:bg-neutral-800 rounded border-transparent'
   }`;
 
   return (
-    <span
-      ref={ref}
-      data-verse={verse.verse}
-      className={`${baseClasses} ${selectionClasses} mr-1 mb-1 verse-view`}
-      onClick={handleClick}
-    >
-      <span className={`text-sm font-semibold mr-1 ${
-        isSelected 
-          ? 'text-white' 
-          : 'text-blue-400'
-      }`}>
-        {verse.verse}
+    <div className="flex mr-1 mb-1">
+      <div className={`${isHighlighted ? `${fadeState === 'visible' ? 'bg-[#111] w-8 border-l !border-neutral-500' : fadeState === 'fading' ? 'w-0 border-l-0 border-transparent' : ''} duration-500` : ''} w-0 border-transparent transition-all`}></div>
+      <span
+        ref={ref}
+        data-verse={verse.verse}
+        className={`${baseClasses} ${selectionClasses} verse-view py-1`}
+        onClick={handleClick}
+      >
+        <span className={`text-sm font-semibold mr-1 ${
+          isSelected 
+            ? 'text-white' 
+            : 'text-blue-400'
+        }`}>
+          {verse.verse}
+        </span>
+        <span className={`${
+          isSelected 
+            ? 'text-blue-500' 
+            : 'text-white/70'
+        } verse-text`}>
+          {parseVerseText(verse.text)}
+        </span>
       </span>
-      <span className={`${
-        isSelected 
-          ? 'text-blue-500' 
-          : 'text-white/70'
-      } verse-text`}>
-        {parseVerseText(verse.text)}
-      </span>
-    </span>
+    </div>
   );
 });
 

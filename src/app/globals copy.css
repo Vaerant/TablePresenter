@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+html {
+  /* scrollbar-color: #888 #444; */
+  scrollbar-color: #333 #111;
+}
+
+.dark-scroll {
+  scrollbar-color: #333 #111;
+}
+
+.middle-scroll {
+  scrollbar-color: #666 #111;
+}
+
+.thin-scroll {
+  scrollbar-width: thin;
+}
+
+button:focus {
+  outline: none;
+}
+
+nextjs-portal {
+  display: none;
+}

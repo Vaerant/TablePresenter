@@ -15,15 +15,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     database: {
         getAllSermons: () => ipcRenderer.invoke('db:getAllSermons'),
         getSermon: (uid) => ipcRenderer.invoke('db:getSermon', uid),
-        getSermonBlocks: (sermonUid) => ipcRenderer.invoke('db:getSermonBlocks', sermonUid),
-        searchText: (query, limit) => ipcRenderer.invoke('db:searchText', query, limit),
-        searchByBlockType: (query, blockType, limit) => ipcRenderer.invoke('db:searchByBlockType', query, blockType, limit),
-        searchSermons: (filters) => ipcRenderer.invoke('db:searchSermons', filters),
-        getSermonStats: (uid) => ipcRenderer.invoke('db:getSermonStats', uid),
-        getParagraphBlocks: (paragraphUid) => ipcRenderer.invoke('db:getParagraphBlocks', paragraphUid),
-        getBlockContext: (sermonUid, blockUid) => ipcRenderer.invoke('db:getBlockContext', sermonUid, blockUid),
-        getSermonSections: (sermonUid) => ipcRenderer.invoke('db:getSermonSections', sermonUid),
-        getSectionParagraphs: (sectionUid) => ipcRenderer.invoke('db:getSectionParagraphs', sectionUid)
+        search: (query, limit, type = 'phrase', sermonUid = null) => ipcRenderer.invoke('db:searchSermons', query, limit, type, sermonUid),
     },
 
     // Bible API
@@ -36,16 +28,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
         getBook: (bookId) => ipcRenderer.invoke('bible:getBook', bookId)
     },
 
-    // Paragraph selection API
-    paragraph: {
-        getCurrentSelection: () => ipcRenderer.invoke('paragraph:getCurrentSelection')
-    },
-
     // System information API
     system: {
         getNetworkInfo: () => ipcRenderer.invoke('system:getNetworkInfo'),
         getConnectionCount: () => ipcRenderer.invoke('system:getConnectionCount'),
-        openExternal: (url) => ipcRenderer.invoke('system:openExternal', url)
+        openExternal: (url) => ipcRenderer.invoke('system:openExternal', url),
+        
+        // Screen management
+        getAllScreens: () => ipcRenderer.invoke('system:getAllScreens'),
+        getScreen: (id) => ipcRenderer.invoke('system:getScreen', id),
+        createScreen: (screenData) => ipcRenderer.invoke('system:createScreen', screenData),
+        updateScreen: (id, screenData) => ipcRenderer.invoke('system:updateScreen', id, screenData),
+        deleteScreen: (id) => ipcRenderer.invoke('system:deleteScreen', id),
+        
+        // Screen space management
+        getScreenSpaces: (screenId) => ipcRenderer.invoke('system:getScreenSpaces', screenId),
+        createScreenSpace: (spaceData) => ipcRenderer.invoke('system:createScreenSpace', spaceData),
+        updateScreenSpace: (id, spaceData) => ipcRenderer.invoke('system:updateScreenSpace', id, spaceData),
+        deleteScreenSpace: (id) => ipcRenderer.invoke('system:deleteScreenSpace', id),
+        updateScreenSpaceSettings: (spaceId, settings) => ipcRenderer.invoke('system:updateScreenSpaceSettings', spaceId, settings)
     },
 
     // Template API
@@ -55,9 +56,4 @@ contextBridge.exposeInMainWorld("electronAPI", {
         listTemplates: () => ipcRenderer.invoke('template:listTemplates'),
         createDefault: () => ipcRenderer.invoke('template:createDefault')
     },
-
-    // Verse API
-    verse: {
-        cleared: () => ipcRenderer.invoke('verse:cleared')
-    }
 });

@@ -1,0 +1,75 @@
+.nav-title,
+.nav-title-mini {
+  position: relative;
+  display: inline-block;
+  padding: 0 8px;
+}
+
+.nav-title-mini::before,
+.nav-title::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 42px;
+  height: 2px;
+  background: #ffffff;
+  transform: translateY(-50%) scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.45s cubic-bezier(.4,0,.2,1);
+  opacity: 0.85;
+}
+
+.nav-title-mini::before {
+  width: 25px;
+}
+
+.nav-title-mini::before,
+.nav-title::before {
+  left: -50px;
+  transform-origin: right center;
+}
+
+.group:hover .nav-title-mini::before,
+.group:hover .nav-title::before,
+.group:hover .nav-title::after {
+  transform: translateY(-50%) scaleX(1);
+}
+
+.nav-title--top::after {
+  /* vertical line below text */
+  content: "";
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  width: 2px;
+  height: 20px; /* adjust as needed */
+  background: #ffffff;
+  opacity: 0.9;
+  transform: translateX(-50%) scaleY(0);
+  transform-origin: top center;
+  transition: transform 0.25s cubic-bezier(.4,0,.2,1);
+}
+
+/* Ensure the title is the positioning context */
+.nav-title--top {
+  position: relative;
+  transition: transform 0.35s cubic-bezier(.4,0,.2,1);
+  background: #00000080;
+  padding: 4px 12px;
+  padding-left: 22px;
+  border-radius: 5px;
+}
+.group:hover .nav-title--top {
+  transform: translateY(-36px);
+  transition-duration: 0.35s;
+}
+
+/* Animate the vertical line in on hover */
+.group:hover .nav-title--top::after {
+  transform: translateX(-50%) scaleY(1);
+}
+
+.gradient-overlay {
+  /* background: linear-gradient(90deg, #0a0a0a 20%, #0a0a0a8c 70%, #0a0a0a00 100%); */
+  background: linear-gradient(90deg, #0a0a0a 20%, #0a0a0a8c 70%, #0a0a0a00 100%);
+}

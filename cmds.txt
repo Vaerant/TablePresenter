@@ -1,0 +1,1 @@
+npm rebuild better-sqlite3 --runtime=electron --target=32.0.0 --dist-url=https://electronjs.org/headers --build-from-source --msvs_version=2022

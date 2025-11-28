@@ -15,11 +15,33 @@
 body {
   background: var(--background);
   color: var(--foreground);
+  /* background: rgba(0, 0, 0, 0.5); */
+  /* background: transparent; */
+  /* backdrop-filter: blur(10px); */
   font-family: Arial, Helvetica, sans-serif;
 }
 
+.main-container {
+  background: rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(550px) saturate(2.2);
+  -webkit-backdrop-filter: blur(15px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+}
+
+/* Make only a specific header area draggable */
+.header-drag {
+  -webkit-app-region: drag;
+}
+
+/* Everything else must be no-drag to remain interactive */
+.no-drag, button, input, a, canvas, .content, .resize-edge {
+  -webkit-app-region: no-drag;
+}
+
 html {
-  scrollbar-color: #888 #444;
+  /* scrollbar-color: #888 #444; */
+  scrollbar-color: #333 #111;
 }
 
 .dark-scroll {

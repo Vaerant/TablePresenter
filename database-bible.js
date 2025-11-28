@@ -227,7 +227,15 @@ class BibleDatabase {
     `;
     
     const stmt = this.db.prepare(sql);
-    return stmt.all({ bookId, chapter });
+    const rows = stmt.all({ bookId, chapter });
+    
+    // Transform rows into verses object format
+    const verses = {};
+    rows.forEach(row => {
+      verses[row.verse] = row.text;
+    });
+    
+    return { verses };
   }
 
   getVerse(bookId, chapter, verse) {

@@ -44,7 +44,13 @@ const useSermonStore = create((set, get) => ({
   },
 
   // Sermon actions
-  setActiveSermon: (sermon) => set({ activeSermon: sermon }),
+  setActiveSermon: (sermon) => {
+    set({ 
+      activeSermon: sermon,
+      selectedParagraph: null,
+      selectedVerses: []
+    });
+  },
 
   setSelectedParagraph: (paragraph) => {
     set({ selectedParagraph: paragraph, selectedVerses: [] }); // Clear verses when selecting paragraph

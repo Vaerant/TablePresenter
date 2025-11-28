@@ -48,10 +48,10 @@ const ListBook = forwardRef(({ data, onPress, onChapterPress, isActive = false, 
           {chapters.length > 0 && (
             <button
               onClick={handleExpandClick}
-              className="p-1 hover:bg-neutral-600 rounded transition-colors px-4"
+              className="p-1 hover:bg-neutral-600 rounded transition-colors px-4 expander"
             >
               <MdChevronRight
-                className={`text-white/30 hover:text-white transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                className={`text-white/30 hover:text-white transition-transform ${isExpanded ? 'rotate-90' : ''} expander:hover:text-white`}  
                 size={20}
               />
             </button>

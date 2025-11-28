@@ -1,0 +1,33 @@
+.mp-tooltip {
+  will-change: transform, opacity;
+  max-width: 280px;
+  line-height: 1.25;
+  word-wrap: break-word;
+}
+
+.mp-tooltip[data-placement^="top"] .mp-tooltip-arrow::before {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.25);
+}
+.mp-tooltip[data-placement^="bottom"] .mp-tooltip-arrow::before {
+  box-shadow: 0 -2px 4px rgba(0,0,0,0.25);
+}
+.mp-tooltip[data-placement^="left"] .mp-tooltip-arrow::before {
+  box-shadow: 2px 0 4px rgba(0,0,0,0.25);
+}
+.mp-tooltip[data-placement^="right"] .mp-tooltip-arrow::before {
+  box-shadow: -2px 0 4px rgba(0,0,0,0.25);
+}
+
+/* High-contrast support */
+@media (prefers-contrast: more) {
+  .mp-tooltip {
+    outline: 1px solid rgba(255,255,255,0.4);
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .mp-tooltip {
+    transition: none !important;
+  }
+}
