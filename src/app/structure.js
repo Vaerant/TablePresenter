@@ -17,13 +17,16 @@ import { TbBrandGooglePodcasts } from "react-icons/tb";
 import { FaChromecast } from "react-icons/fa";
 import { FiSettings } from "react-icons/fi";
 
+import useSermonStore from '@/stores/sermonStore';
+
 import './navHover.css';
 
 const BottomNav = () => {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('BIBLE');
   const [navExpanded, setNavExpanded] = useState(false);
   const [streamingEnabled, setStreamingEnabled] = useState(false);
+
+  const { activeView, setActiveView } = useSermonStore();
 
   return (
     <div className="relative w-full h-[40px] bg-neutral-900 flex items-center justify-between z-50 border-t border-neutral-800 pr-1">
@@ -37,16 +40,16 @@ const BottomNav = () => {
       />
       <div className="w-full flex items-center justify-end gap-2 border-b border-neutral-800">
         <div className={`px-4 min-h-7 text-xs text-center rounded hover:bg-neutral-700/60 flex items-center justify-center select-none
-            ${activeTab == 'BIBLE' ? 'bg-neutral-800/90 hover:bg-neutral-800/90' : ''}
+            ${activeView == 'BIBLE' ? 'bg-neutral-800/90 hover:bg-neutral-800/90' : ''}
             `}
-          onClick={() => setActiveTab('BIBLE')}
+          onClick={() => setActiveView('BIBLE')}
         >
           Bible
         </div>
         <div className={`px-4 min-h-7 text-xs text-center rounded hover:bg-neutral-700/60 flex items-center justify-center select-none
-            ${activeTab == 'SERMONS' ? 'bg-neutral-800/90 hover:bg-neutral-800/90' : ''}
+            ${activeView == 'SERMONS' ? 'bg-neutral-800/90 hover:bg-neutral-800/90' : ''}
             `}
-          onClick={() => setActiveTab('SERMONS')}
+          onClick={() => setActiveView('SERMONS')}
         >
           Tapes
         </div>
@@ -71,9 +74,9 @@ const BottomNav = () => {
           </Tooltip>
         </div>
         <div className={`px-4 min-h-7 text-xs text-center rounded hover:bg-neutral-700/60 flex items-center justify-center select-none
-            ${activeTab == 'STREAMING' ? 'bg-neutral-800/90 hover:bg-neutral-800/90' : ''}
+            ${activeView == 'STREAMING' ? 'bg-neutral-800/90 hover:bg-neutral-800/90' : ''}
             `}
-          onClick={() => setActiveTab('STREAMING')}
+          onClick={() => setActiveView('STREAMING')}
         >
           Stream Settings
         </div>

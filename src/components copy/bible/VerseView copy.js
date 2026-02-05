@@ -4,9 +4,10 @@ import useSermonStore from '@/stores/sermonStore';
 import './VerseView.css';
 
 const VerseView = forwardRef(({ verse, isSelected, onVerseClick }, ref) => {
+  const { verseSelectionMode, highlightedVerse } = useSermonStore();
   const [fadeState, setFadeState] = useState('hidden'); // 'hidden', 'visible', 'fading'
 
-  const isHighlighted = false;
+  const isHighlighted = highlightedVerse === verse.verse;
 
   useEffect(() => {
     if (isHighlighted) {

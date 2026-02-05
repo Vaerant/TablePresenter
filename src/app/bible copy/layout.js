@@ -21,7 +21,7 @@ import Structure from '@/app/structure.js';
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" className="max-h-screen overflow-hidden">
       <body>
         <Structure>{children}</Structure>
       </body>

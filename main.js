@@ -65,15 +65,29 @@ const setupDatabaseHandlers = () => {
 
   ipcMain.handle(
     "db:searchSermons",
-    async (event, query, limit, type = "phrase", sermonUid = null) => {
+    async (event, query, limit, type = "phrase", sermonUid = null, page = 1) => {
       try {
-        return await sermonDatabase.search(query, limit, type, sermonUid);
+        return await sermonDatabase.search(query, limit, type, sermonUid, page);
       } catch (error) {
         console.error("Error in searchSermons:", error);
         throw error;
       }
     }
   );
+
+  // test searchSermons
+  // (async () => {
+  //   try {
+  //     // const testResults = await sermonDatabase.search("faith", 5, "phrase");
+  //     // console.log("Test searchSermons results:", testResults);
+  //     // const testResults2 = await sermonDatabase.search("love", 5, "general");
+  //     // console.log("Test searchSermons results (general):", testResults2);
+  //     const testResults3 = await sermonDatabase.search("grace", 5, "similar");
+  //     console.log("Test searchSermons results (similar):", testResults3);
+  //   } catch (error) {
+  //     console.error("Error during test searchSermons:", error);
+  //   }
+  // })();
 
   // Bible database handlers
   ipcMain.handle("bible:getAllBooks", async () => {
@@ -226,7 +240,7 @@ const createWindow = async () => {
   try {
     mainWindow = new BrowserWindow({
       width: 1400,
-      height: 1000,
+      height: 900,
       autoHideMenuBar: true, // Hide menu bar
       menuBarVisible: false, // Ensure menu bar is hidden
       webPreferences: {

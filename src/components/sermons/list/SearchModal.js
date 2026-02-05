@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import useSermonStore from '@/stores/sermonStore';
 import { sermonSearch } from '@/lib/sermonSearch';
 import SearchResult from './SearchResult';
+import useDebounce from '@/lib/hooks/useDebounce';
 
 import { IoClose } from "react-icons/io5";
 import { IoSearchOutline } from "react-icons/io5";
@@ -26,11 +27,12 @@ const SearchModal = ({ isOpen, onClose }) => {
   const modalRef = useRef(null);
   const searchInputRef = useRef(null);
   const resultsRef = useRef(null);
-  const searchTimeoutRef = useRef(null);
   const combinedSermonListRef = useRef(null);
   const sermonListRef = useRef(null);
   const searchRequestIdRef = useRef(0); // track active block search
   const lastBlockSearchSigRef = useRef(null); // NEW: prevent duplicate searches
+
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
   // Focus input when modal opens and when searchType changes
   useEffect(() => {
@@ -64,9 +66,9 @@ const SearchModal = ({ isOpen, onClose }) => {
 
   // Smart sermon search logic
   const smartSermonSearch = useMemo(() => {
-    if ((searchType !== 'sermons' && searchType !== 'combined') || !searchTerm.trim()) return { sermons: [], suggestion: '', paragraph: null, destinationPreview: '' };
+    if ((searchType !== 'sermons' && searchType !== 'combined') || !debouncedSearchTerm.trim()) return { sermons: [], suggestion: '', paragraph: null, destinationPreview: '' };
 
-    const input = searchTerm.trim();
+    const input = debouncedSearchTerm.trim();
     const dateQuery = normalizeDateQuery(input);
     const isDateSearch = !!dateQuery && /^\d{2}-[0-9A-Za-z]{3,8}$/.test(dateQuery);
 
@@ -146,49 +148,50 @@ const SearchModal = ({ isOpen, onClose }) => {
     }
 
     return { sermons: matchingSermons, suggestion, paragraph, destinationPreview };
-  }, [searchTerm, searchType, sermons, selectedSermonIndex]);
+  }, [debouncedSearchTerm, searchType, sermons, selectedSermonIndex]);
 
   const inlineSermonSuggestion = useMemo(() => {
     if (!(searchType === 'sermons' || searchType === 'combined')) return '';
-    if (!searchTerm) return '';
+    if (!debouncedSearchTerm) return '';
     const suggestion = (smartSermonSearch.suggestion ?? '').toString();
     if (!suggestion) return '';
 
-    const termLower = searchTerm.toLowerCase();
+    const termLower = debouncedSearchTerm.toLowerCase();
     const suggestionLower = suggestion.toLowerCase();
     if (!suggestionLower.startsWith(termLower)) return '';
-    if (suggestion.length <= searchTerm.length) return '';
+    if (suggestion.length <= debouncedSearchTerm.length) return '';
     return suggestion;
-  }, [searchType, searchTerm, smartSermonSearch.suggestion]);
+  }, [searchType, debouncedSearchTerm, smartSermonSearch.suggestion]);
 
   // Debounced search effect for blocks and combined mode
   useEffect(() => {
-    if (searchType === 'blocks' || searchType === 'combined') {
-      if (searchTimeoutRef.current) {
-        clearTimeout(searchTimeoutRef.current);
-      }
+    if (!(searchType === 'blocks' || searchType === 'combined')) return;
 
-      if (searchTerm.trim()) {
-        searchTimeoutRef.current = setTimeout(() => {
-          performBlockSearch(searchTerm, 0, true, blockSearchMode);
-        }, 300);
-      } else {
-        setBlockResults([]);
-        setHasMore(false);
-        setOffset(0);
-      }
-
-      return () => {
-        if (searchTimeoutRef.current) {
-          clearTimeout(searchTimeoutRef.current);
-        }
-      };
+    if (!debouncedSearchTerm.trim()) {
+      lastBlockSearchSigRef.current = null;
+      setBlockResults([]);
+      setHasMore(false);
+      setOffset(0);
+      return;
     }
-  }, [searchTerm, searchType, blockSearchMode]);
 
-  // Effect for sermon block results in modes that show sermon content
+    performBlockSearch(debouncedSearchTerm, 0, true, blockSearchMode);
+  }, [debouncedSearchTerm, searchType, blockSearchMode]);
+
+  // Effect for sermon block results in modes that show sermon content.
+  // Debounced to avoid expensive `loadSermon` calls on every keystroke.
   useEffect(() => {
-    if ((searchType === 'combined' || searchType === 'sermons') && smartSermonSearch.sermons.length > 0) {
+    if (!(searchType === 'combined' || searchType === 'sermons')) {
+      setSermonBlockResults([]);
+      return;
+    }
+
+    if (!debouncedSearchTerm.trim()) {
+      setSermonBlockResults([]);
+      return;
+    }
+
+    if (smartSermonSearch.sermons.length > 0) {
       const fetchSermonBlocks = async () => {
         setIsSermonLoading(true);
         try {
@@ -312,7 +315,7 @@ const SearchModal = ({ isOpen, onClose }) => {
     } else {
       setSermonBlockResults([]);
     }
-  }, [searchType, smartSermonSearch.sermons, smartSermonSearch.paragraph, selectedSermonIndex]);
+  }, [debouncedSearchTerm, searchType, smartSermonSearch.sermons, smartSermonSearch.paragraph, selectedSermonIndex]);
 
   // Smart reset of selected sermon index when sermon part changes
   useEffect(() => {
@@ -357,8 +360,8 @@ const SearchModal = ({ isOpen, onClose }) => {
       const transformed = results.map(r => ({
         ...r,
         paragraphNumber: 1,
-        searchMode,
-        searchQuery: trimmed
+        searchMode
+        ,searchQuery: trimmed
       }));
       if (requestId !== searchRequestIdRef.current) return;
       if (isNewSearch) {
@@ -382,8 +385,8 @@ const SearchModal = ({ isOpen, onClose }) => {
   };
 
   const loadMore = () => {
-    if (!isLoading && hasMore && searchTerm.trim()) {
-      performBlockSearch(searchTerm, offset, false, blockSearchMode);
+    if (!isLoading && hasMore && debouncedSearchTerm.trim()) {
+      performBlockSearch(debouncedSearchTerm, offset, false, blockSearchMode);
     }
   };
 
@@ -515,8 +518,7 @@ const SearchModal = ({ isOpen, onClose }) => {
         ? 'similar'
         : 'phrase';
     setBlockSearchMode(newMode);
-    // Cancel pending debounce & invalidate prior searches
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    // Invalidate prior searches
     searchRequestIdRef.current++; // invalidate any in‑flight result handlers
     setBlockResults([]);
     setOffset(0);
@@ -558,6 +560,17 @@ const SearchModal = ({ isOpen, onClose }) => {
         e.preventDefault();
         if (searchType === 'blocks' || searchType === 'combined') {
           toggleBlockSearchMode();
+        }
+      } else if (e.ctrlKey && e.key === 'f') {
+        // Ctrl+F to focus search input
+        if (isOpen) {
+          e.preventDefault();
+          setSearchType(prev => {
+            const modes = ['combined', 'blocks', 'sermons'];
+            const currentIndex = modes.indexOf(prev);
+            const newIndex = (currentIndex + 1) % modes.length;
+            return modes[newIndex];
+          });
         }
       }
     };
@@ -645,7 +658,6 @@ const SearchModal = ({ isOpen, onClose }) => {
               onClick={() => {
                 if (blockSearchMode === 'phrase') return;
                 setBlockSearchMode('phrase');
-                if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
                 searchRequestIdRef.current++;
                 setBlockResults([]);
                 setOffset(0);
@@ -663,7 +675,6 @@ const SearchModal = ({ isOpen, onClose }) => {
               onClick={() => {
                 if (blockSearchMode === 'general') return;
                 setBlockSearchMode('general');
-                if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
                 searchRequestIdRef.current++;
                 setBlockResults([]);
                 setOffset(0);
@@ -681,7 +692,6 @@ const SearchModal = ({ isOpen, onClose }) => {
               onClick={() => {
                 if (blockSearchMode === 'similar') return;
                 setBlockSearchMode('similar');
-                if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
                 searchRequestIdRef.current++;
                 setBlockResults([]);
                 setOffset(0);

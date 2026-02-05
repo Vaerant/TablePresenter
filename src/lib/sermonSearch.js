@@ -58,21 +58,39 @@ export class SermonSearchEngine {
   }
 
   // Basic text search - return raw results for easier processing
-  async search(query, limit = 50, type = 'phrase', sermonUid = null) {
+  async search(query, limit = 50, type = 'phrase', sermonUid = null, page = 1) {
     await this.initialize();
     let preparedQuery = query?.trim() || '';
 
-    const results = await window.electronAPI.database.search(preparedQuery, limit, type, sermonUid);
-    return results.map(result => ({
+    const resp = await window.electronAPI.database.search(preparedQuery, limit, type, sermonUid, page);
+    const rows = resp?.data || [];
+    const data = rows.map(result => ({
       uid: result.uid,
-      text: result.text,
-      type: result.type,
+      paragraph_uid: result.uid || result.paragraph_uid,
       section_uid: result.section_uid,
-      paragraph_uid: result.paragraph_uid,
       sermon_uid: result.sermon_uid,
-      title: result.title,
-      date: result.date
+      section_number: result.section_number,
+      text: result.paragraph_text ?? result.text ?? '',
+      paragraph_text: result.paragraph_text,
+      rank: result.rank,
+      distance: result.distance,
+      block_uid: result.block_uid,
+      title: result.sermon_title ?? result.title,
+      sermon_title: result.sermon_title,
+      date: result.sermon_date ?? result.date,
+      sermon_date: result.sermon_date,
     }));
+
+    return { data, pagination: resp?.pagination || null };
+  }
+
+  // Back-compat name used by SearchModal and API routes.
+  // Returns { data, pagination }.
+  async searchText(query, limit = 50, searchMode = 'phrase', sermonUid = null, page = 1) {
+    const type = (searchMode === 'general' || searchMode === 'phrase' || searchMode === 'similar')
+      ? searchMode
+      : 'phrase';
+    return this.search(query, limit, type, sermonUid, page);
   }
 
   // 2. Search by sermon metadata using SQLite

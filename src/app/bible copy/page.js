@@ -15,6 +15,10 @@ import { IoSearchOutline } from "react-icons/io5";
 import { FaLinesLeaning } from "react-icons/fa6";
 import { LuLetterText } from "react-icons/lu";
 
+import { CgCross } from "react-icons/cg";
+import { RiCrossFill } from "react-icons/ri";
+import { LuWheat } from "react-icons/lu";
+
 export default function BiblePage() {
 
   const [activeTab, setActiveTab] = useState('BIBLE');
@@ -32,7 +36,7 @@ export default function BiblePage() {
   const searchInputRef = useRef(null);
   const selectedBookRef = useRef(null);
 
-  const { activeBook, setActiveBook, setActiveBookWithChapter, setActiveBookWithVerse } = useSermonStore();
+  const { activeBook, setActiveBook, setActiveBookData, activeChapter, setActiveBookWithVerse } = useSermonStore();
 
   useEffect(() => {
     const fetchBooks = async () => {
@@ -184,7 +188,7 @@ export default function BiblePage() {
       }
 
       const bookData = await bibleSearch.getBook(targetBook.id);
-      setActiveBookWithVerse(targetBook, bookData, targetChapter, verse);
+      // setActiveBookWithVerse(targetBook, bookData, targetChapter, verse);
 
       // Clear search
       setSearchTerm('');
@@ -334,13 +338,18 @@ export default function BiblePage() {
   };
 
   const handleChapterPress = async (book, chapterNumber) => {
+
+    if (activeBook?.id === book.id && activeChapter === chapterNumber) {
+      return; // Do nothing if already active
+    }
+
     console.log('Chapter pressed:', book, chapterNumber);
     setLoading(true);
 
     try {
       const bookData = await bibleSearch.getBook(book.id);
       console.log('Book data loaded:', bookData);
-      setActiveBookWithChapter(book, bookData, chapterNumber);
+      setActiveBookData(bookData);
     } catch (error) {
       console.error('Error loading book data:', error);
     } finally {
@@ -378,19 +387,21 @@ export default function BiblePage() {
           <div className='flex flex-col bg-neutral-900 border-r border-neutral-800 h-full'>
 
             <div className="w-full p-4 flex items-center justify-evenly gap-3 border-b border-neutral-800">
-              <div className={`flex-1 min-w-[4.5rem] min-h-10 text-sm text-center rounded hover:bg-neutral-700/60 flex items-center justify-center select-none
-                  ${activeTab == 'BIBLE' ? 'bg-white text-black font-bold hover:bg-white' : 'bg-neutral-800/40'}
+              <div className={`flex-1 min-w-[4.5rem] min-h-10 text-sm text-center rounded hover:bg-neutral-700/60 flex items-center justify-center select-none relative transition-all duration-200
+                  ${activeTab == 'BIBLE' ? 'bg-neutral-700/40 hover:bg-neutral-700/40' : 'bg-neutral-800/40'}
                   `}
                 onClick={() => setActiveTab('BIBLE')}
               >
-                Bible
+                <RiCrossFill className="absolute left-5 top-1/2 -translate-y-1/2" size={18} />
+                <p>Bible</p>
               </div>
-              <div className={`flex-1 min-w-[4.5rem] min-h-10 text-sm text-center rounded hover:bg-neutral-700/60 flex items-center justify-center select-none
-                  ${activeTab == 'SERMONS' ? 'bg-white text-black font-bold hover:bg-white' : 'bg-neutral-800/40'}
+              <div className={`flex-1 min-w-[4.5rem] min-h-10 text-sm text-center rounded hover:bg-neutral-700/60 flex items-center justify-center select-none relative transition-all duration-200
+                  ${activeTab == 'SERMONS' ? 'bg-neutral-700/40 hover:bg-neutral-700/40' : 'bg-neutral-800/40'}
                   `}
                 onClick={() => setActiveTab('SERMONS')}
               >
-                Tapes
+                <LuWheat className="absolute left-5 top-1/2 -translate-y-1/2" size={18} />
+                <p>Tapes</p>
               </div>
             </div>
 
@@ -486,7 +497,7 @@ export default function BiblePage() {
         }
       />
 
-      {/* <SearchModal isOpen={isSearchModalOpen} onClose={() => setIsSearchModalOpen(false)} /> */}
+      <SearchModal isOpen={isSearchModalOpen} onClose={() => setIsSearchModalOpen(false)} />
 
       {/* <BibleControlPanel /> */}
     </div>

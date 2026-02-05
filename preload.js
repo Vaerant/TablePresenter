@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     database: {
         getAllSermons: () => ipcRenderer.invoke('db:getAllSermons'),
         getSermon: (uid) => ipcRenderer.invoke('db:getSermon', uid),
-        search: (query, limit, type = 'phrase', sermonUid = null) => ipcRenderer.invoke('db:searchSermons', query, limit, type, sermonUid),
+        search: (query, limit, type = 'phrase', sermonUid = null, page = 1) => ipcRenderer.invoke('db:searchSermons', query, limit, type, sermonUid, page),
     },
 
     // Bible API

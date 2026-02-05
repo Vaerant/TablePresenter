@@ -2,9 +2,11 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const OpenAI = require('openai');
 const axios = require('axios');
+require('dotenv').config();
 
 async function createQueryEmbedding(query, model = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small') {
   if (!process.env.OPENAI_API_KEY) {
+    console.error('---------OPENAI_API_KEY is not set in environment variables.');
     throw new Error('OPENAI_API_KEY env var is required for embeddings.');
   }
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -78,6 +80,46 @@ class SermonDatabase {
     this.generalSearchCache = new Map(); // key -> { ts, results }
   }
 
+  buildPagination({ page, pageSize, total, returnedCount }) {
+    const safePageSize = typeof pageSize === 'number' ? pageSize : null;
+    const safePage = typeof page === 'number' ? page : 1;
+
+    // If pageSize is -1 (meaning "all"), pagination is mostly informational.
+    if (safePageSize === -1) {
+      const safeTotal = typeof total === 'number' ? total : (typeof returnedCount === 'number' ? returnedCount : null);
+      return {
+        page: 1,
+        pageSize: -1,
+        total: safeTotal,
+        totalPages: safeTotal != null ? 1 : null,
+        hasPrev: false,
+        hasNext: false,
+      };
+    }
+
+    const safeTotal = typeof total === 'number' ? total : null;
+    const totalPages = safeTotal != null && safePageSize > 0 ? Math.max(1, Math.ceil(safeTotal / safePageSize)) : null;
+    const hasPrev = safePage > 1;
+    const hasNext = totalPages != null
+      ? safePage < totalPages
+      : (typeof returnedCount === 'number' && safePageSize > 0 ? returnedCount === safePageSize : false);
+
+    return {
+      page: safePage,
+      pageSize: safePageSize,
+      total: safeTotal,
+      totalPages,
+      hasPrev,
+      hasNext,
+    };
+  }
+
+  normalizePage(page) {
+    const p = Number(page);
+    if (!Number.isFinite(p) || p < 1) return 1;
+    return Math.floor(p);
+  }
+
   initialize() {
     console.log('Initializing database connection in Electron main process...');
     if (this.initialized) return;
@@ -103,6 +145,7 @@ class SermonDatabase {
   }
 
   getBlocksByUids(blockUids) {
+    this.ensureInitialized();
     if (!blockUids || blockUids.length === 0) return [];
     
     const placeholders = blockUids.map(() => '?').join(',');
@@ -118,6 +161,32 @@ class SermonDatabase {
       WHERE b.uid IN (${placeholders})
     `);
     return query.all(...blockUids);
+  }
+
+  getParagraphsByBlockUids(blockUids) {
+    this.ensureInitialized();
+    if (!blockUids || blockUids.length === 0) return [];
+
+    const placeholders = blockUids.map(() => '?').join(',');
+    const sql = `
+      SELECT
+        b.uid AS block_uid,
+        p.uid AS paragraph_uid,
+        p.section_uid AS section_uid,
+        sec.sermon_uid AS sermon_uid,
+        COALESCE(pt.text, '') AS paragraph_text,
+        sec.number AS section_number,
+        ser.title AS sermon_title,
+        ser.date AS sermon_date
+      FROM blocks b
+      JOIN paragraphs p ON p.uid = b.paragraph_uid
+      JOIN sections sec ON sec.uid = p.section_uid
+      JOIN sermons ser ON ser.uid = sec.sermon_uid
+      LEFT JOIN paragraphs_text pt ON pt.uid = p.uid
+      WHERE b.uid IN (${placeholders})
+    `;
+
+    return this.db.prepare(sql).all(...blockUids);
   }
 
   getAllSermons() {
@@ -337,10 +406,32 @@ class SermonDatabase {
     };
   }
 
-  searchParagraphs(query, limit = 20, sermonUid = null) {
+  searchParagraphs(query, limit = 20, sermonUid = null, page = 1) {
     let search;
+    this.ensureInitialized();
 
-    if (limit === -1) {
+    const safePage = this.normalizePage(page);
+    const safeLimit = typeof limit === 'number' ? limit : 20;
+    const offset = safeLimit > 0 ? (safePage - 1) * safeLimit : 0;
+
+    const makeCountQuery = (withSermon) => {
+      if (withSermon) {
+        return this.db.prepare(`
+          SELECT COUNT(*) AS total
+          FROM paragraphs_fts
+          JOIN paragraphs_text pt ON pt.rowid = paragraphs_fts.rowid
+          WHERE paragraphs_fts MATCH ? AND pt.sermon_uid = ?
+        `);
+      }
+      return this.db.prepare(`
+        SELECT COUNT(*) AS total
+        FROM paragraphs_fts
+        JOIN paragraphs_text pt ON pt.rowid = paragraphs_fts.rowid
+        WHERE paragraphs_fts MATCH ?
+      `);
+    };
+
+    if (safeLimit === -1) {
       if (sermonUid) {
         search = this.db.prepare(`
         SELECT 
@@ -360,7 +451,9 @@ class SermonDatabase {
         WHERE paragraphs_fts MATCH ? AND pt.sermon_uid = ?
         ORDER BY rank
       `);
-        return search.all(query, sermonUid);
+        const data = search.all(query, sermonUid);
+        const pagination = this.buildPagination({ page: 1, pageSize: -1, total: data.length, returnedCount: data.length });
+        return { data, pagination };
       } else {
         search = this.db.prepare(`
         SELECT 
@@ -379,10 +472,14 @@ class SermonDatabase {
         WHERE paragraphs_fts MATCH ?
         ORDER BY rank
       `);
-        return search.all(query);
+        const data = search.all(query);
+        const pagination = this.buildPagination({ page: 1, pageSize: -1, total: data.length, returnedCount: data.length });
+        return { data, pagination };
       }
     } else {
       if (sermonUid) {
+        const totalRow = makeCountQuery(true).get(query, sermonUid);
+        const total = totalRow?.total ?? null;
         search = this.db.prepare(`
         SELECT 
           pt.uid,
@@ -400,9 +497,14 @@ class SermonDatabase {
         WHERE paragraphs_fts MATCH ? AND pt.sermon_uid = ?
         ORDER BY rank
         LIMIT ?
+        OFFSET ?
       `);
-        return search.all(query, sermonUid, limit);
+        const data = search.all(query, sermonUid, safeLimit, offset);
+        const pagination = this.buildPagination({ page: safePage, pageSize: safeLimit, total, returnedCount: data.length });
+        return { data, pagination };
       } else {
+        const totalRow = makeCountQuery(false).get(query);
+        const total = totalRow?.total ?? null;
         search = this.db.prepare(`
         SELECT 
           pt.uid,
@@ -420,13 +522,16 @@ class SermonDatabase {
         WHERE paragraphs_fts MATCH ?
         ORDER BY rank
         LIMIT ?
+        OFFSET ?
       `);
-        return search.all(query, limit);
+        const data = search.all(query, safeLimit, offset);
+        const pagination = this.buildPagination({ page: safePage, pageSize: safeLimit, total, returnedCount: data.length });
+        return { data, pagination };
       }
     }
   }
 
-  generalSearch(word, limit = 20, sermonUid = null) {
+  generalSearch(word, limit = 20, sermonUid = null, page = 1) {
     let query;
     if (word.includes('*')) {
       query = word;
@@ -434,26 +539,81 @@ class SermonDatabase {
       const words = word.trim().split(/\s+/);
       query = words.map(w => `"${w}"`).join(' ');
     }
-    return this.searchParagraphs(query, limit, sermonUid);
+    return this.searchParagraphs(query, limit, sermonUid, page);
   }
 
-  searchParagraphsExactPhrase(phrase, limit = 20, sermonUid = null) {
-    return this.searchParagraphs(`"${phrase}"`, limit, sermonUid);
+  searchParagraphsExactPhrase(phrase, limit = 20, sermonUid = null, page = 1) {
+    return this.searchParagraphs(`"${phrase}"`, limit, sermonUid, page);
   }
 
-  async searchSimilar(query, limit = 20) {
+  async searchSimilar(query, limit = 20, page = 1) {
     const embedding = await createQueryEmbedding(query);
-    return performSimilaritySearch(embedding, limit);
+    this.ensureInitialized();
+
+    const safePage = this.normalizePage(page);
+    const safeLimit = typeof limit === 'number' ? limit : 20;
+    const start = safeLimit > 0 ? (safePage - 1) * safeLimit : 0;
+    const end = safeLimit > 0 ? start + safeLimit : undefined;
+
+    // Fetch extra candidates so we can de-dupe at paragraph level.
+    const candidateLimit = Math.min(Math.max(safeLimit * 8 * safePage, safeLimit), 500);
+    const hits = await performSimilaritySearch(embedding, candidateLimit);
+    if (!hits || hits.length === 0) {
+      return { data: [], pagination: this.buildPagination({ page: safePage, pageSize: safeLimit, total: 0, returnedCount: 0 }) };
+    }
+
+    const blockUids = hits.map(h => h.block_uid).filter(Boolean);
+    const rows = this.getParagraphsByBlockUids(blockUids);
+    const byBlockUid = new Map(rows.map(r => [r.block_uid, r]));
+
+    // De-dupe by paragraph_uid, keeping the best (highest) distance.
+    const bestByParagraph = new Map();
+    for (const hit of hits) {
+      const row = byBlockUid.get(hit.block_uid);
+      if (!row || !row.paragraph_uid) continue;
+
+      const prev = bestByParagraph.get(row.paragraph_uid);
+      if (!prev || (typeof hit.distance === 'number' && hit.distance > prev.distance)) {
+        bestByParagraph.set(row.paragraph_uid, {
+          uid: row.paragraph_uid,
+          section_uid: row.section_uid,
+          sermon_uid: row.sermon_uid,
+          paragraph_text: row.paragraph_text,
+          rank: null,
+          section_number: row.section_number,
+          sermon_title: row.sermon_title,
+          sermon_date: row.sermon_date,
+          block_uid: hit.block_uid,
+          id: hit.id,
+          distance: hit.distance
+        });
+      }
+    }
+
+    const all = Array.from(bestByParagraph.values())
+      .sort((a, b) => (b.distance ?? -Infinity) - (a.distance ?? -Infinity))
+    const total = all.length;
+    const data = safeLimit === -1 ? all : all.slice(start, end);
+
+    const pagination = this.buildPagination({
+      page: safeLimit === -1 ? 1 : safePage,
+      pageSize: safeLimit,
+      total,
+      returnedCount: data.length,
+    });
+
+    return { data, pagination };
   }
 
-  async search(query, limit = 20, type = 'general', sermonUid = null) {
+  async search(query, limit = 20, type = 'general', sermonUid = null, page = 1) {
+    // console.log(`Performing ${type} search for query: "${query}" with limit ${limit} (page ${page})`);
     switch (type) {
       case 'general':
-        return this.generalSearch(query, limit, sermonUid);
+        return this.generalSearch(query, limit, sermonUid, page);
       case 'phrase':
-        return this.searchParagraphsExactPhrase(query, limit, sermonUid);
+        return this.searchParagraphsExactPhrase(query, limit, sermonUid, page);
       case 'similar':
-        return this.searchSimilar(query, limit);
+        return this.searchSimilar(query, limit, page);
       default:
         throw new Error(`Unknown search type: ${type}`);
     }
@@ -467,5 +627,18 @@ class SermonDatabase {
     }
   }
 }
+
+// if (require.main === module) {
+//   const sermonDb = new SermonDatabase();
+//   sermonDb.initialize();
+  
+//   // sample search for each type
+//   (async () => {
+//     console.log('General Search Results:', sermonDb.generalSearch('faith hope love', 5));
+//     console.log('Phrase Search Results:', sermonDb.searchParagraphsExactPhrase('faith hope love', 5));
+//     console.log('Similarity Search Results:', await sermonDb.searchSimilar('faith hope love', 5));
+//     sermonDb.close();
+//   })();
+// }
 
 module.exports = { SermonDatabase };
