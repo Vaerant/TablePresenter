@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     database: {
         getAllSermons: () => ipcRenderer.invoke('db:getAllSermons'),
         getSermon: (uid) => ipcRenderer.invoke('db:getSermon', uid),
+        startSermonStream: (uid, options = {}) => ipcRenderer.invoke('db:startSermonStream', uid, options),
+        cancelSermonStream: (requestId) => ipcRenderer.invoke('db:cancelSermonStream', requestId),
         search: (query, limit, type = 'phrase', sermonUid = null, page = 1) => ipcRenderer.invoke('db:searchSermons', query, limit, type, sermonUid, page),
     },
 
@@ -47,6 +49,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
         updateScreenSpace: (id, spaceData) => ipcRenderer.invoke('system:updateScreenSpace', id, spaceData),
         deleteScreenSpace: (id) => ipcRenderer.invoke('system:deleteScreenSpace', id),
         updateScreenSpaceSettings: (spaceId, settings) => ipcRenderer.invoke('system:updateScreenSpaceSettings', spaceId, settings)
+    },
+
+    // Window controls for custom title bar
+    windowControls: {
+        minimize: () => ipcRenderer.invoke('window:minimize'),
+        toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+        isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+        close: () => ipcRenderer.invoke('window:close'),
+        onMaximizeChanged: (callback) => {
+            const listener = (_event, isMaximized) => callback(isMaximized);
+            ipcRenderer.on('window:maximize-changed', listener);
+            return () => ipcRenderer.removeListener('window:maximize-changed', listener);
+        }
     },
 
     // Template API

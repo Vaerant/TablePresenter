@@ -8,6 +8,7 @@ import useSermonStore from '@/stores/sermonStore';
 const ListTitle = forwardRef(({ data, onPress, isActive = false, isSelected = false }, ref) => {
 
   const handleSermonClick = () => {
+    console.log('ListTitle clicked:', data);
     if (isActive) return; // Do nothing if already active
     onPress(data);
   };

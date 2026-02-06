@@ -10,6 +10,8 @@ import { IoSearchOutline } from "react-icons/io5";
 import ListTitle from './ListTitle';
 import SearchModal from './SearchModal';
 
+import { shallow } from 'zustand/shallow';
+
 export default function SermonList() {
 
   const ROW_HEIGHT = 84;
@@ -25,7 +27,16 @@ export default function SermonList() {
   const [listViewportSize, setListViewportSize] = useState({ width: 0, height: 0 });
   const [scrollTop, setScrollTop] = useState(0);
 
-  const { sermons, activeSermon, setSermons, setActiveSermon, setActiveSermonData } = useSermonStore();
+  const { sermons, activeSermon, setSermons, setActiveSermon, setActiveSermonData } = useSermonStore(
+    (s) => ({
+      sermons: s.sermons,
+      activeSermon: s.activeSermon,
+      setSermons: s.setSermons,
+      setActiveSermon: s.setActiveSermon,
+      setActiveSermonData: s.setActiveSermonData,
+    }),
+    shallow
+  );
 
   // fetch sermons on mount
   useEffect(() => {
@@ -39,10 +50,14 @@ export default function SermonList() {
   }, [sermons.length, setSermons]);
 
   const handleSermonPress = async (sermon) => {
-    const sermonData = await sermonSearch.loadSermon(sermon.uid);
-    console.log('Selected Sermon:', sermonData);
+    console.log('Loading sermon:', sermon);
+    // Set selection immediately so the UI updates instantly.
+    // Let `SermonView` load the heavy sermon structure in the background.
     setActiveSermon(sermon);
-    setActiveSermonData(sermonData);
+
+    // Clear any previous sermon structure so the view shows a loading state
+    // while streamed chunks arrive.
+    setActiveSermonData(null);
   };
 
   const smartSermonSearch = useMemo(() => {
@@ -311,7 +326,7 @@ export default function SermonList() {
   };
 
   useEffect(() => {
-    const handleKeyDown = (e) => {
+    const handleGlobalKeyDown = (e) => {
       if (e.ctrlKey && e.key === 'f') {
         e.preventDefault();
         setIsSearchModalOpen(true);
@@ -321,14 +336,12 @@ export default function SermonList() {
       if (e.altKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
         searchInputRef.current?.focus();
-        return;
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-
+    window.addEventListener('keydown', handleGlobalKeyDown);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleGlobalKeyDown);
     };
   }, []);
 

@@ -369,6 +369,7 @@ export default function BibleList() {
     try {
       const bookData = await bibleSearch.getBook(book.id);
       console.log('Book data loaded:', bookData);
+      setActiveBook(book);
       setActiveBookData(bookData);
       setActiveChapter(chapterNumber);
       // setActiveChapterData(bookData.chapters[chapterNumber - 1]);

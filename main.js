@@ -4,6 +4,7 @@ const http = require("http");
 const WebSocket = require("ws");
 const os = require("os");
 const fs = require("fs").promises;
+const crypto = require("crypto");
 
 let appServe = null;
 let sermonDatabase = null;
@@ -13,6 +14,96 @@ let mainWindow = null;
 
 // Add sermon preloading cache
 let isPreloading = false;
+
+// Sermon streaming state (avoid sending huge objects in a single IPC payload)
+const activeSermonStreams = new Map(); // requestId -> { cancelled: boolean, senderId: number }
+const activeStreamBySender = new Map(); // webContents.id -> requestId
+
+const cancelSermonStream = (requestId) => {
+  const state = activeSermonStreams.get(requestId);
+  if (!state) return false;
+  state.cancelled = true;
+  activeSermonStreams.set(requestId, state);
+  return true;
+};
+
+const isStreamCancelled = (requestId) => {
+  const state = activeSermonStreams.get(requestId);
+  return !state || state.cancelled;
+};
+
+const yieldToEventLoop = async () => {
+  await new Promise((resolve) => setImmediate(resolve));
+};
+
+const streamSermonToSender = async (sender, requestId, uid, options = {}) => {
+  const paragraphBatchSizeRaw = Number(options?.paragraphBatchSize ?? 25);
+  const paragraphBatchSize = Number.isFinite(paragraphBatchSizeRaw)
+    ? Math.max(5, Math.min(200, Math.floor(paragraphBatchSizeRaw)))
+    : 25;
+
+  // Stream directly from SQLite to avoid materializing the full sermon in memory.
+  // IMPORTANT: use the async variant so we yield to the event loop.
+  if (typeof sermonDatabase?.streamSermonAsync !== "function") {
+    throw new Error("SermonDatabase.streamSermonAsync is not available");
+  }
+
+  let started = false;
+  let sermonMeta = null;
+
+  const safeSend = (channel, payload) => {
+    if (sender.isDestroyed()) return;
+    sender.send(channel, payload);
+  };
+
+  await sermonDatabase.streamSermonAsync(uid, {
+    paragraphBatchSize,
+    yieldEveryRows: 1200,
+    isCancelled: () => isStreamCancelled(requestId),
+    onStart: (meta) => {
+      if (isStreamCancelled(requestId)) return;
+      if (!meta) {
+        safeSend("db:sermonStreamError", { requestId, message: `Sermon not found: ${uid}` });
+        return;
+      }
+      started = true;
+      sermonMeta = meta;
+      safeSend("db:sermonStreamStart", {
+        requestId,
+        totalParagraphs: null,
+        sermon: {
+          id: meta.id,
+          uid: meta.uid,
+          title: meta.title,
+          date: meta.date,
+          orderedSectionIds: meta.orderedSectionIds || [],
+          sections: meta.sections || {},
+        },
+      });
+    },
+    onChunk: async (chunk) => {
+      if (isStreamCancelled(requestId)) return;
+      if (!started && sermonMeta) {
+        // should not happen, but be defensive
+        started = true;
+      }
+      safeSend("db:sermonStreamChunk", {
+        requestId,
+        sectionId: chunk.sectionId,
+        paragraphIds: chunk.paragraphIds,
+        paragraphs: chunk.paragraphs,
+        sections: chunk.sections,
+        sentParagraphs: chunk.sentParagraphs,
+        totalParagraphs: null,
+      });
+      await yieldToEventLoop();
+    },
+    onDone: () => {
+      if (isStreamCancelled(requestId)) return;
+      safeSend("db:sermonStreamDone", { requestId });
+    },
+  });
+};
 
 // Initialize databases in main process
 const initializeDatabases = async () => {
@@ -63,6 +154,57 @@ const setupDatabaseHandlers = () => {
     }
   });
 
+  // Stream a sermon in chunks to reduce UI lag from large IPC payloads.
+  ipcMain.handle("db:startSermonStream", async (event, uid, options = {}) => {
+    if (!uid) throw new Error("Sermon uid is required");
+
+    const sender = event.sender;
+    const senderId = sender.id;
+
+    // Cancel any previous active stream for this renderer.
+    const prevRequestId = activeStreamBySender.get(senderId);
+    if (prevRequestId) {
+      cancelSermonStream(prevRequestId);
+      activeSermonStreams.delete(prevRequestId);
+      activeStreamBySender.delete(senderId);
+    }
+
+    const requestId = typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    activeSermonStreams.set(requestId, { cancelled: false, senderId });
+    activeStreamBySender.set(senderId, requestId);
+
+    // Fire and forget: start streaming on the next tick so the renderer can attach listeners.
+    setImmediate(() => {
+      streamSermonToSender(sender, requestId, uid, options).catch((err) => {
+      console.error("Error streaming sermon:", err);
+      if (!sender.isDestroyed()) {
+        sender.send("db:sermonStreamError", {
+          requestId,
+          message: err?.message || String(err),
+        });
+      }
+      }).finally(() => {
+        activeSermonStreams.delete(requestId);
+        // Only clear sender mapping if it still points to this requestId.
+        if (activeStreamBySender.get(senderId) === requestId) {
+          activeStreamBySender.delete(senderId);
+        }
+      });
+    });
+
+    return { requestId };
+  });
+
+  ipcMain.handle("db:cancelSermonStream", async (_event, requestId) => {
+    if (!requestId) return false;
+    const cancelled = cancelSermonStream(requestId);
+    if (cancelled) activeSermonStreams.delete(requestId);
+    return cancelled;
+  });
+
   ipcMain.handle(
     "db:searchSermons",
     async (event, query, limit, type = "phrase", sermonUid = null, page = 1) => {
@@ -88,6 +230,17 @@ const setupDatabaseHandlers = () => {
   //     console.error("Error during test searchSermons:", error);
   //   }
   // })();
+
+  // test getSermon
+  // (async () => {
+  //   try {
+  //     const testSermon = await sermonDatabase.getSermon("b5aca7393e97");
+  //     console.log("Test getSermon result:", testSermon);
+  //   } catch (error) {
+  //     console.error("Error during test getSermon:", error);
+  //   }
+  // })();
+
 
   // Bible database handlers
   ipcMain.handle("bible:getAllBooks", async () => {
@@ -236,11 +389,40 @@ const setupDatabaseHandlers = () => {
   });
 };
 
+const setupWindowHandlers = () => {
+  ipcMain.handle("window:minimize", async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.minimize();
+  });
+
+  ipcMain.handle("window:toggleMaximize", async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+      return false;
+    }
+    mainWindow.maximize();
+    return true;
+  });
+
+  ipcMain.handle("window:isMaximized", async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    return mainWindow.isMaximized();
+  });
+
+  ipcMain.handle("window:close", async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.close();
+  });
+};
+
 const createWindow = async () => {
   try {
     mainWindow = new BrowserWindow({
-      width: 1400,
-      height: 900,
+      width: 1300,
+      height: 700,
+      minWidth: 200,
+      frame: false,
       autoHideMenuBar: true, // Hide menu bar
       menuBarVisible: false, // Ensure menu bar is hidden
       webPreferences: {
@@ -253,6 +435,16 @@ const createWindow = async () => {
 
     // Hide the menu bar completely
     mainWindow.setMenuBarVisibility(false);
+
+    // Broadcast maximize state so the renderer can update button icon/state
+    mainWindow.on("maximize", () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.send("window:maximize-changed", true);
+    });
+    mainWindow.on("unmaximize", () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.send("window:maximize-changed", false);
+    });
 
     if (app.isPackaged) {
       if (!appServe) {
@@ -284,6 +476,7 @@ app.on("ready", async () => {
     console.log("App ready, initializing...");
     await initializeDatabases();
     setupDatabaseHandlers();
+    setupWindowHandlers();
     await createWindow();
     console.log("App initialization complete");
   } catch (error) {

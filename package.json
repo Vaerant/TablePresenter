@@ -23,6 +23,7 @@
     "wait-on": "^7.0.1"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.13.18",
     "autoprefixer": "^10.4.21",
     "better-sqlite3": "^12.4.1",
     "electron-serve": "^3.0.0",

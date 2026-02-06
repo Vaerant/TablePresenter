@@ -3,6 +3,7 @@
 import "./globals.css";
 
 import Structure from './structure.js';
+import TitleBar from '@/components/TitleBar';
 
 // const geistSans = Geist({
 //   variable: "--font-geist-sans",
@@ -22,8 +23,13 @@ import Structure from './structure.js';
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className="max-h-screen overflow-hidden">
-      <body>
-        <Structure hideNav>{children}</Structure>
+      <body className="h-screen overflow-hidden">
+        <div className="h-screen overflow-hidden flex flex-col">
+          <TitleBar />
+          <div className="flex-1 overflow-hidden">
+            <Structure hideNav>{children}</Structure>
+          </div>
+        </div>
       </body>
     </html>
   );

@@ -29,7 +29,7 @@ const BottomNav = () => {
   const { activeView, setActiveView } = useSermonStore();
 
   return (
-    <div className="relative w-full h-[40px] bg-neutral-900 flex items-center justify-between z-50 border-t border-neutral-800 pr-1">
+    <div className="relative w-full min-h-[40px] h-[40px] bg-neutral-900 flex items-center justify-between z-50 border-t border-neutral-800 pr-1">
       {/* <div className="text-white font-medium">Table Quote Presenter</div> */}
       <Image
         src={MessagePresenterLogo}
@@ -113,8 +113,9 @@ const BottomNav = () => {
 const Structure = ({ children, hideNav = false }) => {
   return (
     <div className="h-screen flex flex-col antialiased max-h-screen overflow-hidden">
-      {/* <div className="flex-grow overflow-hidden" style={{ height: 'calc(100vh - 50px)' }}> */}
-      <div className="flex-grow overflow-hidden max-h-screen">
+      <div className="flex-grow overflow-hidden" style={{ maxHeight: hideNav ? '100vh' : 'calc(100vh - 78px)' }}>
+      {/* <div className="flex-grow overflow-hidden" style={{ maxHeight: 'calc(100vh - 78px)' }}> */}
+      {/* <div className="flex-grow overflow-hidden max-h-screen"> */}
         {children}
       </div>
       {!hideNav && <BottomNav />}

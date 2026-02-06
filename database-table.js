@@ -250,6 +250,352 @@ class SermonDatabase {
     return structuredSermon;
   }
 
+  /**
+   * Stream a sermon out of SQLite without materializing the full structure at once.
+   * 
+   * @param {string} uid sermon uid
+   * @param {object} options
+   * @param {number} options.paragraphBatchSize
+   * @param {(meta: object) => void} options.onStart
+   * @param {(chunk: { sectionId: string, paragraphIds: string[], paragraphs: object, sections?: object, sentParagraphs?: number }) => void} options.onChunk
+   * @param {() => void} options.onDone
+   * @param {() => boolean} options.isCancelled
+   */
+  streamSermon(uid, {
+    paragraphBatchSize = 25,
+    onStart,
+    onChunk,
+    onDone,
+    isCancelled
+  } = {}) {
+    this.ensureInitialized();
+    const batchSize = Number.isFinite(Number(paragraphBatchSize))
+      ? Math.max(1, Math.min(500, Math.floor(Number(paragraphBatchSize))))
+      : 25;
+
+    const stmt = this.db.prepare(`
+      SELECT 
+        s.id, s.uid, s.title, s.date,
+        sec.uid as section_uid, sec.number as section_number, sec.order_index as section_order,
+        p.uid as paragraph_uid, p.order_index as paragraph_order,
+        b.uid as block_uid, b.text as block_text, b.type as block_type, 
+        b.order_index as block_order, b.indented as block_indented
+      FROM sermons s
+      LEFT JOIN sections sec ON sec.sermon_uid = s.uid
+      LEFT JOIN paragraphs p ON p.section_uid = sec.uid
+      LEFT JOIN blocks b ON b.paragraph_uid = p.uid
+      WHERE s.uid = ?
+      ORDER BY sec.order_index, p.order_index, b.order_index
+    `);
+
+    const cancelled = () => (typeof isCancelled === 'function' ? isCancelled() : false);
+
+    let started = false;
+    let sermonMeta = null;
+    const knownSections = new Map(); // sectionId -> { number, order }
+
+    let currentSectionId = null;
+    let currentParagraphId = null;
+    let currentParagraph = null;
+
+    let batchParagraphIds = [];
+    let batchParagraphs = {};
+    let batchSectionId = null;
+    let sentParagraphs = 0;
+
+    const flushBatch = () => {
+      if (!batchSectionId || batchParagraphIds.length === 0) return;
+      const sectionsAdded = {};
+      // include the section meta for the current section (and any new ones we discovered)
+      if (knownSections.has(batchSectionId)) {
+        const meta = knownSections.get(batchSectionId);
+        sectionsAdded[batchSectionId] = { number: meta.number, order: meta.order };
+      }
+      onChunk && onChunk({
+        sectionId: batchSectionId,
+        paragraphIds: batchParagraphIds,
+        paragraphs: batchParagraphs,
+        sections: sectionsAdded,
+        sentParagraphs,
+      });
+      batchParagraphIds = [];
+      batchParagraphs = {};
+      batchSectionId = null;
+    };
+
+    const finalizeCurrentParagraph = () => {
+      if (!currentSectionId || !currentParagraphId || !currentParagraph) return;
+
+      // If section changes mid-batch, flush so chunks are grouped by section.
+      if (batchSectionId && batchSectionId !== currentSectionId) {
+        flushBatch();
+      }
+
+      batchSectionId = currentSectionId;
+      batchParagraphIds.push(currentParagraphId);
+      batchParagraphs[currentParagraphId] = currentParagraph;
+      sentParagraphs += 1;
+
+      // Flush by size
+      if (batchParagraphIds.length >= batchSize) {
+        flushBatch();
+      }
+
+      currentParagraphId = null;
+      currentParagraph = null;
+    };
+
+    let anyRows = false;
+    for (const row of stmt.iterate(uid)) {
+      if (cancelled()) return;
+      anyRows = true;
+
+      if (!started) {
+        started = true;
+        sermonMeta = {
+          id: row.id,
+          uid: row.uid,
+          title: row.title,
+          date: row.date,
+          orderedSectionIds: [],
+          sections: {},
+        };
+        onStart && onStart(sermonMeta);
+      }
+
+      // If there is no section (sermon with no content), we just keep going.
+      if (!row.section_uid) continue;
+
+      if (!knownSections.has(row.section_uid)) {
+        knownSections.set(row.section_uid, { number: row.section_number, order: row.section_order });
+        if (sermonMeta && !sermonMeta.orderedSectionIds.includes(row.section_uid)) {
+          sermonMeta.orderedSectionIds.push(row.section_uid);
+          sermonMeta.sections[row.section_uid] = {
+            number: row.section_number,
+            order: row.section_order,
+            orderedParagraphIds: [],
+            paragraphs: {},
+          };
+        }
+      }
+
+      // Detect paragraph boundary
+      const nextSectionId = row.section_uid;
+      const nextParagraphId = row.paragraph_uid;
+
+      const isNewParagraph = nextParagraphId && (nextParagraphId !== currentParagraphId || nextSectionId !== currentSectionId);
+      if (isNewParagraph) {
+        // finalize previous
+        finalizeCurrentParagraph();
+        currentSectionId = nextSectionId;
+        currentParagraphId = nextParagraphId;
+        currentParagraph = {
+          order: row.paragraph_order,
+          blocks: {},
+          orderedBlockIds: [],
+        };
+      }
+
+      // Blocks (may be null)
+      if (currentParagraph && row.block_uid) {
+        currentParagraph.blocks[row.block_uid] = {
+          text: row.block_text,
+          type: row.block_type,
+          order: row.block_order,
+          indented: !!row.block_indented,
+        };
+        currentParagraph.orderedBlockIds.push(row.block_uid);
+      }
+    }
+
+    if (!anyRows) {
+      onStart && onStart(null);
+      onDone && onDone();
+      return;
+    }
+
+    // finalize tail
+    finalizeCurrentParagraph();
+    flushBatch();
+    onDone && onDone();
+  }
+
+  /**
+   * Async version of streamSermon() that yields to the event loop while iterating.
+   * This prevents Electron's main process from freezing during large sermons.
+   */
+  async streamSermonAsync(uid, {
+    paragraphBatchSize = 25,
+    yieldEveryRows = 1500,
+    onStart,
+    onChunk,
+    onDone,
+    isCancelled
+  } = {}) {
+    this.ensureInitialized();
+
+    const batchSize = Number.isFinite(Number(paragraphBatchSize))
+      ? Math.max(1, Math.min(500, Math.floor(Number(paragraphBatchSize))))
+      : 25;
+
+    const yieldRows = Number.isFinite(Number(yieldEveryRows))
+      ? Math.max(100, Math.min(20000, Math.floor(Number(yieldEveryRows))))
+      : 1500;
+
+    const stmt = this.db.prepare(`
+      SELECT 
+        s.id, s.uid, s.title, s.date,
+        sec.uid as section_uid, sec.number as section_number, sec.order_index as section_order,
+        p.uid as paragraph_uid, p.order_index as paragraph_order,
+        b.uid as block_uid, b.text as block_text, b.type as block_type, 
+        b.order_index as block_order, b.indented as block_indented
+      FROM sermons s
+      LEFT JOIN sections sec ON sec.sermon_uid = s.uid
+      LEFT JOIN paragraphs p ON p.section_uid = sec.uid
+      LEFT JOIN blocks b ON b.paragraph_uid = p.uid
+      WHERE s.uid = ?
+      ORDER BY sec.order_index, p.order_index, b.order_index
+    `);
+
+    const cancelled = () => (typeof isCancelled === 'function' ? isCancelled() : false);
+    const yieldToLoop = async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    };
+
+    let started = false;
+    let sermonMeta = null;
+    const knownSections = new Map();
+
+    let currentSectionId = null;
+    let currentParagraphId = null;
+    let currentParagraph = null;
+
+    let batchParagraphIds = [];
+    let batchParagraphs = {};
+    let batchSectionId = null;
+    let sentParagraphs = 0;
+
+    const flushBatch = async () => {
+      if (!batchSectionId || batchParagraphIds.length === 0) return;
+      const sectionsAdded = {};
+      if (knownSections.has(batchSectionId)) {
+        const meta = knownSections.get(batchSectionId);
+        sectionsAdded[batchSectionId] = { number: meta.number, order: meta.order };
+      }
+      if (onChunk) {
+        await onChunk({
+          sectionId: batchSectionId,
+          paragraphIds: batchParagraphIds,
+          paragraphs: batchParagraphs,
+          sections: sectionsAdded,
+          sentParagraphs,
+        });
+      }
+      batchParagraphIds = [];
+      batchParagraphs = {};
+      batchSectionId = null;
+    };
+
+    const finalizeCurrentParagraph = async () => {
+      if (!currentSectionId || !currentParagraphId || !currentParagraph) return;
+      if (batchSectionId && batchSectionId !== currentSectionId) {
+        await flushBatch();
+      }
+      batchSectionId = currentSectionId;
+      batchParagraphIds.push(currentParagraphId);
+      batchParagraphs[currentParagraphId] = currentParagraph;
+      sentParagraphs += 1;
+      if (batchParagraphIds.length >= batchSize) {
+        await flushBatch();
+      }
+      currentParagraphId = null;
+      currentParagraph = null;
+    };
+
+    const iter = stmt.iterate(uid)[Symbol.iterator]();
+    let anyRows = false;
+    let rowCount = 0;
+
+    // Manual iteration so we can yield.
+    while (true) {
+      if (cancelled()) return;
+      const next = iter.next();
+      if (next.done) break;
+      const row = next.value;
+      anyRows = true;
+      rowCount += 1;
+
+      if (!started) {
+        started = true;
+        sermonMeta = {
+          id: row.id,
+          uid: row.uid,
+          title: row.title,
+          date: row.date,
+          orderedSectionIds: [],
+          sections: {},
+        };
+        if (onStart) await onStart(sermonMeta);
+      }
+
+      if (!row.section_uid) {
+        if (rowCount % yieldRows === 0) await yieldToLoop();
+        continue;
+      }
+
+      if (!knownSections.has(row.section_uid)) {
+        knownSections.set(row.section_uid, { number: row.section_number, order: row.section_order });
+        if (sermonMeta && !sermonMeta.orderedSectionIds.includes(row.section_uid)) {
+          sermonMeta.orderedSectionIds.push(row.section_uid);
+          sermonMeta.sections[row.section_uid] = {
+            number: row.section_number,
+            order: row.section_order,
+            orderedParagraphIds: [],
+            paragraphs: {},
+          };
+        }
+      }
+
+      const nextSectionId = row.section_uid;
+      const nextParagraphId = row.paragraph_uid;
+      const isNewParagraph = nextParagraphId && (nextParagraphId !== currentParagraphId || nextSectionId !== currentSectionId);
+      if (isNewParagraph) {
+        await finalizeCurrentParagraph();
+        currentSectionId = nextSectionId;
+        currentParagraphId = nextParagraphId;
+        currentParagraph = {
+          order: row.paragraph_order,
+          blocks: {},
+          orderedBlockIds: [],
+        };
+      }
+
+      if (currentParagraph && row.block_uid) {
+        currentParagraph.blocks[row.block_uid] = {
+          text: row.block_text,
+          type: row.block_type,
+          order: row.block_order,
+          indented: !!row.block_indented,
+        };
+        currentParagraph.orderedBlockIds.push(row.block_uid);
+      }
+
+      if (rowCount % yieldRows === 0) {
+        await yieldToLoop();
+      }
+    }
+
+    if (!anyRows) {
+      if (onStart) await onStart(null);
+      if (onDone) await onDone();
+      return;
+    }
+
+    await finalizeCurrentParagraph();
+    await flushBatch();
+    if (onDone) await onDone();
+  }
+
   buildSermonHierarchyOptimized(rows) {
     if (!rows || rows.length === 0) return null;
     
@@ -260,7 +606,8 @@ class SermonDatabase {
       title: firstRow.title,
       date: firstRow.date,
       sections: {},
-      orderedSectionIds: []
+      orderedSectionIds: [],
+      blockIndex: {}, // ✅ build once in main process to avoid renderer freeze
     };
 
     // Use Maps for O(1) lookup instead of arrays
@@ -305,6 +652,16 @@ class SermonDatabase {
         indented: !!row.block_indented,
       };
       paragraph.orderedBlockIds.push(row.block_uid);
+
+      // ✅ Flat index (used by renderer/search/highlighting/etc) without extra pass
+      sermon.blockIndex[row.block_uid] = {
+        text: row.block_text,
+        type: row.block_type,
+        sectionId: row.section_uid,
+        paragraphId: row.paragraph_uid,
+        order: row.block_order,
+        indented: !!row.block_indented,
+      };
     }
     
     // Convert Maps back to objects
@@ -628,17 +985,28 @@ class SermonDatabase {
   }
 }
 
-// if (require.main === module) {
-//   const sermonDb = new SermonDatabase();
-//   sermonDb.initialize();
+if (require.main === module) {
+  const sermonDb = new SermonDatabase();
+  sermonDb.initialize();
   
-//   // sample search for each type
-//   (async () => {
-//     console.log('General Search Results:', sermonDb.generalSearch('faith hope love', 5));
-//     console.log('Phrase Search Results:', sermonDb.searchParagraphsExactPhrase('faith hope love', 5));
-//     console.log('Similarity Search Results:', await sermonDb.searchSimilar('faith hope love', 5));
-//     sermonDb.close();
-//   })();
-// }
+  // sample search for each type
+  // (async () => {
+  //   console.log('General Search Results:', sermonDb.generalSearch('faith hope love', 5));
+  //   console.log('Phrase Search Results:', sermonDb.searchParagraphsExactPhrase('faith hope love', 5));
+  //   console.log('Similarity Search Results:', await sermonDb.searchSimilar('faith hope love', 5));
+  //   sermonDb.close();
+  // })();
+
+  // test getSermon "b5aca7393e97"
+  // (async () => {
+  //   const sermons = sermonDb.getAllSermons();
+  //   console.log('All Sermons:', sermons);
+  //   if (sermons.length > 0) {
+  //     const sermon = sermonDb.getSermon(sermons[0].uid);
+  //     console.log('First Sermon with structure:', sermon);
+  //   }
+  //   sermonDb.close();
+  // })();
+}
 
 module.exports = { SermonDatabase };

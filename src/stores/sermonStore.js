@@ -14,6 +14,17 @@ const useSermonStore = create((set, get) => ({
   selectedVerses: [],
   highlightedVerses: [],
 
+  // Sermon selection state
+  selectedParagraph: null,
+
+  // Display settings (used when broadcasting to presenter window)
+  displaySettings: {
+    enabled: true,
+    showTitle: true,
+    showDate: true,
+    showContent: true,
+  },
+
   sermons: [],
   activeSermon: null,
   activeSermonData: null,
@@ -28,10 +39,15 @@ const useSermonStore = create((set, get) => ({
   setActiveVerse: (verse) => set({ activeVerse: verse }),
   setActiveVerseData: (data) => set({ activeVerseData: data }),
   setSelectedVerses: (verses) => set({ selectedVerses: verses }),
+  clearSelectedVerses: () => set({ selectedVerses: [] }),
   setHighlightedVerses: (verses) => set({ highlightedVerses: verses }),
 
+  setSelectedParagraph: (paragraph) => set({ selectedParagraph: paragraph, selectedVerses: [] }),
+  clearSelectedParagraph: () => set({ selectedParagraph: null }),
+  setDisplaySettings: (settings) => set({ displaySettings: settings }),
+
   setSermons: (sermons) => set({ sermons: sermons }),
-  setActiveSermon: (sermon) => set({ activeSermon: sermon }),
+  setActiveSermon: (sermon) => set({ activeSermon: sermon, activeSermonData: null, selectedParagraph: null, selectedVerses: [] }),
   setActiveSermonData: (data) => set({ activeSermonData: data }),
 
 }));
