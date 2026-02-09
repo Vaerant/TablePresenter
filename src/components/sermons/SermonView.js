@@ -8,7 +8,6 @@ import { ParagraphView, BlockView } from './ParagraphViews'; // NEW
 const SermonView = () => {
   const {
     activeSermon,
-    setActiveSermonData,
     selectedParagraph,
     displaySettings,
     setSelectedParagraph,
@@ -17,9 +16,6 @@ const SermonView = () => {
   } = useSermonStore();
 
   const [sermonData, setSermonData] = useState(null);
-  // Keep a lightweight, append-only navigation list so we don't have to
-  // rebuild/flatten the entire sermon structure on every streamed chunk.
-  const [flatParagraphs, setFlatParagraphs] = useState([]);
   const [showSectionPopover, setShowSectionPopover] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [highlightedParagraphId, setHighlightedParagraphId] = useState(null);
@@ -31,213 +27,103 @@ const SermonView = () => {
   const [lastBlockGlobalIndex, setLastBlockGlobalIndex] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Progressive render to keep large sermons responsive.
-  const [renderCount, setRenderCount] = useState(20);
-
   const popoverRef = useRef(null);
   const searchPopoverRef = useRef(null);
   const searchInputRef = useRef(null);
   const buttonRef = useRef(null);
 
-  const flatParagraphKeysRef = useRef(new Set());
-  const nextGlobalIndexRef = useRef(0);
-  const sermonRef = useRef(null);
-
-  // Stream sermon structure when sermon changes (avoids renderer lag from huge IPC payload)
+  // Load sermon structure if needed
   useEffect(() => {
     let mounted = true;
-    let cancelStream = null;
-    let rafId = null;
-
-    let pendingSermon = null;
-    let pendingReset = false;
-    let pendingDone = false;
-    const pendingChunkDeltas = [];
-
-    const flush = () => {
-      if (!mounted) return;
-      rafId = null;
-
-      if (pendingReset) {
-        pendingReset = false;
-        pendingDone = false;
-        flatParagraphKeysRef.current = new Set();
-        nextGlobalIndexRef.current = 0;
-        setFlatParagraphs([]);
-
-        // Publish header/meta once at start; avoid updating on every chunk.
-        if (sermonRef.current) {
-          setSermonData({ ...sermonRef.current });
-        }
-      }
-
-      if (pendingChunkDeltas.length > 0) {
-        const deltas = pendingChunkDeltas.splice(0, pendingChunkDeltas.length);
-        setFlatParagraphs((prev) => {
-          let out = prev;
-          for (const d of deltas) {
-            if (!d || d.type !== 'chunk') continue;
-            const sid = d.sectionId;
-            const pids = Array.isArray(d.paragraphIds) ? d.paragraphIds : [];
-            if (!sid || pids.length === 0) continue;
-
-            const section = pendingSermon?.sections?.[sid];
-            const sectionNumber = section?.number;
-
-            const toAppend = [];
-            for (const pid of pids) {
-              const key = `${sid}::${pid}`;
-              if (flatParagraphKeysRef.current.has(key)) continue;
-              flatParagraphKeysRef.current.add(key);
-              const paragraphOrder = section?.paragraphs?.[pid]?.order;
-              toAppend.push({
-                sectionId: sid,
-                sectionNumber,
-                paragraphId: pid,
-                paragraphOrder,
-                globalIndex: ++nextGlobalIndexRef.current,
-              });
-            }
-            if (toAppend.length > 0) {
-              out = out === prev ? prev.concat(toAppend) : out.concat(toAppend);
-            }
-          }
-          return out;
-        });
-      }
-
-      // Only publish to the global store once at the end of streaming.
-      if (pendingDone) {
-        pendingDone = false;
-        if (sermonRef.current) {
-          const final = { ...sermonRef.current };
-          setSermonData(final);
-          setActiveSermonData(final);
-        }
-      }
-    };
-
-    const scheduleFlush = () => {
-      if (!mounted) return;
-      if (rafId != null) return;
-      rafId = window.requestAnimationFrame(flush);
-    };
-
-    const setPartial = (sermon, delta) => {
-      if (!mounted) return;
-      pendingSermon = sermon;
-      sermonRef.current = sermon;
-      if (delta?.type === 'start') {
-        pendingReset = true;
-      } else if (delta?.type === 'chunk') {
-        pendingChunkDeltas.push(delta);
-      } else if (delta?.type === 'done') {
-        pendingDone = true;
-      }
-      scheduleFlush();
-    };
-
     const load = async () => {
-      setSermonData(null);
-      setActiveSermonData(null);
-      setFlatParagraphs([]);
-      flatParagraphKeysRef.current = new Set();
-      nextGlobalIndexRef.current = 0;
-      sermonRef.current = null;
-      if (!activeSermon?.uid) return;
-
+      if (!activeSermon) {
+        setSermonData(null);
+        return;
+      }
+      
+      // If activeSermon already has sections, use it immediately
+      if (activeSermon.sections && activeSermon.orderedSectionIds) {
+        if (mounted) setSermonData(activeSermon);
+        return;
+      }
+      
+      // Show minimal loading state
       setIsLoading(true);
+      
       try {
-        const { promise, cancel } = sermonSearch.streamSermon(activeSermon.uid, {
-          paragraphBatchSize: 10,
-          onUpdate: setPartial,
-        });
-        cancelStream = cancel;
-        const finalSermon = await promise;
-        if (mounted && finalSermon) {
-          setPartial(finalSermon, { type: 'done' });
+        // Use requestIdleCallback for better performance
+        const loadData = async () => {
+          const loaded = await sermonSearch.loadSermon(activeSermon.uid);
+          if (mounted && loaded) {
+            setSermonData(loaded);
+          }
+        };
+        
+        if (window.requestIdleCallback) {
+          window.requestIdleCallback(loadData, { timeout: 100 });
+        } else {
+          await loadData();
         }
       } catch (error) {
-        console.error('Failed to stream sermon structure:', error);
+        console.error('Failed to load sermon structure:', error);
       } finally {
         if (mounted) setIsLoading(false);
       }
     };
-
+    
     load();
     return () => {
       mounted = false;
-      if (rafId != null) window.cancelAnimationFrame(rafId);
-      if (typeof cancelStream === 'function') cancelStream();
     };
-  }, [activeSermon?.uid, setActiveSermonData]);
+  }, [activeSermon]);
 
-  // NOTE: old one-shot loader is replaced by the streaming loader above.
+  // Build ordered sections and a flat list of all paragraphs for navigation
+  const orderedSections = useMemo(() => {
+    if (!sermonData?.sections || !sermonData?.orderedSectionIds) return [];
+    return sermonData.orderedSectionIds.map(sectionId => {
+      const section = sermonData.sections[sectionId];
+      return { id: sectionId, number: section.number, order: section.order, paragraphs: section.paragraphs, orderedParagraphIds: section.orderedParagraphIds };
+    });
+  }, [sermonData]);
+
+  const flatParagraphs = useMemo(() => {
+    // modified: add globalIndex
+    const list = [];
+    let idx = 0;
+    orderedSections.forEach(sec => {
+      (sec.orderedParagraphIds || []).forEach(parId => {
+        const p = sec.paragraphs[parId];
+        list.push({
+          sectionId: sec.id,
+          sectionNumber: sec.number,
+            paragraphId: parId,
+            paragraphOrder: p.order,
+            globalIndex: ++idx
+        });
+      });
+    });
+    return list;
+  }, [orderedSections]);
 
   // NEW: global flatBlocks list for cross-paragraph block range selection
   const flatBlocks = useMemo(() => {
-    if (!blockSelectionMode) return [];
     const list = [];
     let idx = 0;
-    if (!sermonData?.sections) return [];
-
-    for (const item of flatParagraphs) {
-      const sec = sermonData.sections[item.sectionId];
-      const paragraph = sec?.paragraphs?.[item.paragraphId];
-      if (!paragraph) continue;
-      (paragraph.orderedBlockIds || []).forEach((bid) => {
-        list.push({
-          sectionId: item.sectionId,
-          paragraphId: item.paragraphId,
-          blockId: bid,
-          globalIndex: idx++
+    orderedSections.forEach(sec => {
+      (sec.orderedParagraphIds || []).forEach(parId => {
+        const paragraph = sec.paragraphs[parId];
+        (paragraph.orderedBlockIds || []).forEach(bid => {
+          list.push({
+            sectionId: sec.id,
+            paragraphId: parId,
+            blockId: bid,
+            globalIndex: idx++
+          });
         });
       });
-    }
+    });
     return list;
-  }, [flatParagraphs, sermonData, blockSelectionMode]);
-
-  const blockGlobalIndexById = useMemo(() => {
-    if (!blockSelectionMode || flatBlocks.length === 0) return null;
-    const map = new Map();
-    for (const b of flatBlocks) map.set(b.blockId, b.globalIndex);
-    return map;
-  }, [flatBlocks, blockSelectionMode]);
-
-  // Reset progressive rendering when sermon changes.
-  useEffect(() => {
-    setRenderCount(80);
-  }, [sermonData?.uid]);
-
-  // Keep rendering more in idle time until everything is displayed.
-  useEffect(() => {
-    if (!sermonData) return;
-    if (renderCount >= flatParagraphs.length) return;
-
-    let cancelled = false;
-    let idleId = null;
-    let timeoutId = null;
-
-    const step = () => {
-      if (cancelled) return;
-      setRenderCount((prev) => {
-        const next = Math.min(flatParagraphs.length, prev + 120);
-        return next;
-      });
-    };
-
-    if (window.requestIdleCallback) {
-      idleId = window.requestIdleCallback(step, { timeout: 150 });
-    } else {
-      timeoutId = window.setTimeout(step, 0);
-    }
-
-    return () => {
-      cancelled = true;
-      if (idleId != null && window.cancelIdleCallback) window.cancelIdleCallback(idleId);
-      if (timeoutId != null) window.clearTimeout(timeoutId);
-    };
-  }, [sermonData, flatParagraphs.length, renderCount]);
+  }, [orderedSections]);
 
   const findSelectedIndex = () => {
     if (!selectedParagraph) return -1;
@@ -305,15 +191,6 @@ const SermonView = () => {
   // Scroll to selected paragraph
   useEffect(() => {
     if (!selectedParagraph) return;
-
-    // Ensure the selected paragraph is actually rendered before trying to scroll.
-    const selectedIdx = flatParagraphs.findIndex(
-      p => p.sectionId === selectedParagraph.sectionId && p.paragraphId === selectedParagraph.paragraphId
-    );
-    if (selectedIdx >= 0 && selectedIdx + 1 > renderCount) {
-      setRenderCount(Math.min(flatParagraphs.length, selectedIdx + 40));
-    }
-
     setTimeout(() => {
       const el = document.querySelector(`[data-paragraph="${selectedParagraph.paragraphId}"]`);
       if (el) {
@@ -322,7 +199,7 @@ const SermonView = () => {
         setTimeout(() => setHighlightedParagraphId(null), 3000);
       }
     }, 100);
-  }, [selectedParagraph, flatParagraphs, renderCount]);
+  }, [selectedParagraph]);
 
   // FIX keep hook order stable
   useEffect(() => {
@@ -340,9 +217,7 @@ const SermonView = () => {
     );
   }
 
-  // Show a loading skeleton only until we have *any* sermon data.
-  // Once streaming starts, render partial content immediately.
-  if (!sermonData) {
+  if (isLoading || !sermonData) {
     return (
       <div className="flex-1 bg-neutral-900 text-white flex flex-col h-full">
         {/* Show sermon header immediately while loading */}
@@ -363,13 +238,9 @@ const SermonView = () => {
     );
   }
 
-  // Use the most up-to-date streamed sermon structure without forcing a re-render
-  // on every incoming chunk.
-  const liveSermon = sermonRef.current || sermonData;
-
   const handleSendSelection = (sectionId, paragraphId, specificBlockId = null) => {
-    if (!liveSermon?.sections?.[sectionId]?.paragraphs?.[paragraphId]) return;
-    const section = liveSermon.sections[sectionId];
+    if (!sermonData?.sections?.[sectionId]?.paragraphs?.[paragraphId]) return;
+    const section = sermonData.sections[sectionId];
     const paragraph = section.paragraphs[paragraphId];
 
     const blocks = (paragraph.orderedBlockIds || [])
@@ -389,9 +260,9 @@ const SermonView = () => {
       window.electronAPI.send('paragraph:selected', {
         paragraphData: {
           type: 'paragraph',
-          sermonUid: liveSermon.uid,
-          title: liveSermon.title,
-          date: liveSermon.date,
+          sermonUid: sermonData.uid,
+          title: sermonData.title,
+          date: sermonData.date,
           sectionUid: sectionId,
           sectionNumber: section.number,
           paragraphUid: paragraphId,
@@ -411,7 +282,7 @@ const SermonView = () => {
   const handleSendMultiParagraphSelection = (paragraphMetaList) => { // NEW
     if (typeof window === 'undefined' || !window.electronAPI) return;
     const paragraphsData = paragraphMetaList.map(meta => {
-      const section = liveSermon.sections[meta.sectionId];
+      const section = sermonData.sections[meta.sectionId];
       const paragraph = section.paragraphs[meta.paragraphId];
       const blocks = (paragraph.orderedBlockIds || []).map(bid => {
         const b = paragraph.blocks[bid];
@@ -434,9 +305,9 @@ const SermonView = () => {
     window.electronAPI.send('paragraph:selected', {
       paragraphData: {
         type: 'paragraph-multi',
-        sermonUid: liveSermon.uid,
-        title: liveSermon.title,
-        date: liveSermon.date,
+        sermonUid: sermonData.uid,
+        title: sermonData.title,
+        date: sermonData.date,
         paragraphs: paragraphsData
       },
       displaySettings: displaySettings || {
@@ -452,11 +323,8 @@ const SermonView = () => {
   const handleSendBlocksSelection = (blockIds) => {
     if (typeof window === 'undefined' || !window.electronAPI || blockIds.length === 0) return;
 
-    if (!blockSelectionMode || flatBlocks.length === 0) return;
-
     // Group selected blocks by paragraph
-    const idSet = new Set(blockIds);
-    const selectedBlockMeta = flatBlocks.filter(b => idSet.has(b.blockId));
+    const selectedBlockMeta = flatBlocks.filter(b => blockIds.includes(b.blockId));
     const grouped = {};
     selectedBlockMeta.forEach(b => {
       const key = `${b.sectionId}::${b.paragraphId}`;
@@ -465,7 +333,7 @@ const SermonView = () => {
     });
 
     const paragraphsData = Object.values(grouped).map(meta => {
-      const section = liveSermon.sections[meta.sectionId];
+      const section = sermonData.sections[meta.sectionId];
       const paragraph = section.paragraphs[meta.paragraphId];
       const blocks = meta.blockIds.map(bid => {
         const b = paragraph.blocks[bid];
@@ -489,9 +357,9 @@ const SermonView = () => {
     window.electronAPI.send('paragraph:selected', {
       paragraphData: {
         type: blockIds.length === 1 ? 'paragraph-block-single' : 'block-multi',
-        sermonUid: liveSermon.uid,
-        title: liveSermon.title,
-        date: liveSermon.date,
+        sermonUid: sermonData.uid,
+        title: sermonData.title,
+        date: sermonData.date,
         paragraphs: paragraphsData
       },
       displaySettings: displaySettings || {
@@ -507,7 +375,7 @@ const SermonView = () => {
     // Clear selected block when changing paragraph
     setSelectedBlockId(null);
     setSelectedBlockIds([]); // NEW clear blocks when focusing single paragraph
-    setSelectedParagraph({ sermonUid: liveSermon.uid, sectionId, paragraphId });
+    setSelectedParagraph({ sermonUid: sermonData.uid, sectionId, paragraphId });
     handleSendSelection(sectionId, paragraphId);
   };
 
@@ -524,7 +392,7 @@ const SermonView = () => {
       const range = flatParagraphs.slice(start, end + 1).map(p => p.paragraphId);
       const merged = Array.from(new Set([...selectedParagraphIds, ...range]));
       setSelectedParagraphIds(merged);
-      setSelectedParagraph({ sermonUid: liveSermon.uid, sectionId: item.sectionId, paragraphId: pid });
+      setSelectedParagraph({ sermonUid: sermonData.uid, sectionId: item.sectionId, paragraphId: pid });
       handleSendMultiParagraphSelection(
         flatParagraphs
           .filter(p => merged.includes(p.paragraphId))
@@ -542,7 +410,7 @@ const SermonView = () => {
       if (updated.length === 0) {
         clearSelectedParagraph();
       } else {
-        setSelectedParagraph({ sermonUid: liveSermon.uid, sectionId: item.sectionId, paragraphId: pid });
+        setSelectedParagraph({ sermonUid: sermonData.uid, sectionId: item.sectionId, paragraphId: pid });
         if (updated.length === 1) {
           handleSendSelection(item.sectionId, pid);
         } else {
@@ -573,8 +441,8 @@ const SermonView = () => {
   const handleBlockClick = (paragraphMeta, blockId, ctrlKey, shiftKey) => {
     if (!blockSelectionMode) return;
 
-    const currentGlobalIndex = blockGlobalIndexById?.get(blockId);
-    if (typeof currentGlobalIndex !== 'number') return;
+    const currentGlobalIndex = flatBlocks.findIndex(b => b.blockId === blockId);
+    if (currentGlobalIndex === -1) return;
 
     if (shiftKey) {
       // Determine anchor: lastBlockGlobalIndex or last selected block in global order
@@ -705,14 +573,14 @@ const SermonView = () => {
   return (
     <div className="flex-1 bg-neutral-900 text-white flex flex-col overflow-y-scroll h-full dark-scroll relative">
       <h1 className="text-3xl font-bold my-6 ml-6 text-center">
-        {liveSermon.title} <span className="text-neutral-400 text-xl font-normal ml-2">{liveSermon.date}</span>
+        {sermonData.title} <span className="text-neutral-400 text-xl font-normal ml-2">{sermonData.date}</span>
       </h1>
 
       {/* Replaced sectioned display with flat paragraphs */}
       <div className="flex flex-col px-4">
-        {flatParagraphs.slice(0, renderCount).map(item => {
+        {flatParagraphs.map(item => {
           // ...existing paragraph resolution...
-          const sec = liveSermon.sections[item.sectionId];
+          const sec = sermonData.sections[item.sectionId];
           const paragraph = sec?.paragraphs?.[item.paragraphId];
           if (!paragraph) return null;
           const isSelected = isParagraphSelected(item.sectionId, item.paragraphId);
@@ -755,7 +623,7 @@ const SermonView = () => {
             className="px-4 rounded bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 flex items-center gap-2 transition-colors"
           >
             <p className="text-sm font-semibold my-2">
-              {liveSermon.title}
+              {sermonData.title}
             </p>
             {showSectionPopover ? <FaCaretDown /> : <FaCaretUp />}
           </button>
@@ -786,7 +654,7 @@ const SermonView = () => {
             ${showSectionPopover ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0 pointer-events-none'}
           `}
         >
-            {showSectionPopover && flatParagraphs.map(p => {
+          {flatParagraphs.map(p => {
             const selected = selectedParagraph && selectedParagraph.sectionId === p.sectionId && selectedParagraph.paragraphId === p.paragraphId;
             return (
               <button
@@ -803,7 +671,7 @@ const SermonView = () => {
                 {p.globalIndex}
               </button>
             );
-            })}
+          })}
         </div>
 
         {/* Search Popover (Go to paragraph) */}

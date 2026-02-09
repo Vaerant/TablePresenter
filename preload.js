@@ -15,8 +15,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     database: {
         getAllSermons: () => ipcRenderer.invoke('db:getAllSermons'),
         getSermon: (uid) => ipcRenderer.invoke('db:getSermon', uid),
-        startSermonStream: (uid, options = {}) => ipcRenderer.invoke('db:startSermonStream', uid, options),
-        cancelSermonStream: (requestId) => ipcRenderer.invoke('db:cancelSermonStream', requestId),
         search: (query, limit, type = 'phrase', sermonUid = null, page = 1) => ipcRenderer.invoke('db:searchSermons', query, limit, type, sermonUid, page),
     },
 
@@ -51,7 +49,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
         updateScreenSpaceSettings: (spaceId, settings) => ipcRenderer.invoke('system:updateScreenSpaceSettings', spaceId, settings)
     },
 
-    // Window controls for custom title bar
+    // Template API
+    template: {
+        checkTemplate: (stage) => ipcRenderer.invoke('template:checkTemplate', stage),
+        getTemplate: (stage) => ipcRenderer.invoke('template:getTemplate', stage),
+        listTemplates: () => ipcRenderer.invoke('template:listTemplates'),
+        createDefault: () => ipcRenderer.invoke('template:createDefault')
+    },
+
     windowControls: {
         minimize: () => ipcRenderer.invoke('window:minimize'),
         toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
@@ -62,13 +67,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
             ipcRenderer.on('window:maximize-changed', listener);
             return () => ipcRenderer.removeListener('window:maximize-changed', listener);
         }
-    },
-
-    // Template API
-    template: {
-        checkTemplate: (stage) => ipcRenderer.invoke('template:checkTemplate', stage),
-        getTemplate: (stage) => ipcRenderer.invoke('template:getTemplate', stage),
-        listTemplates: () => ipcRenderer.invoke('template:listTemplates'),
-        createDefault: () => ipcRenderer.invoke('template:createDefault')
     },
 });
