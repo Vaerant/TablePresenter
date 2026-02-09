@@ -15,19 +15,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     database: {
         getAllSermons: () => ipcRenderer.invoke('db:getAllSermons'),
         getSermon: (uid) => ipcRenderer.invoke('db:getSermon', uid),
+        getSermonFull: (uid) => ipcRenderer.invoke('db:getSermonFull', uid),
         getSermonStructure: (uid) => ipcRenderer.invoke('db:getSermonStructure', uid),
         getSermonSectionData: (sermonUid, sectionUids) => ipcRenderer.invoke('db:getSermonSectionData', sermonUid, sectionUids),
-        loadSermonStreaming: (uid) => ipcRenderer.invoke('db:loadSermonStreaming', uid),
-        onSermonStructure: (callback) => {
-            const listener = (_event, data) => callback(data);
-            ipcRenderer.on('sermon:structure', listener);
-            return () => ipcRenderer.removeListener('sermon:structure', listener);
-        },
-        onSermonChunk: (callback) => {
-            const listener = (_event, data) => callback(data);
-            ipcRenderer.on('sermon:chunk', listener);
-            return () => ipcRenderer.removeListener('sermon:chunk', listener);
-        },
         search: (query, limit, type = 'phrase', sermonUid = null, page = 1) => ipcRenderer.invoke('db:searchSermons', query, limit, type, sermonUid, page),
     },
 

@@ -146,6 +146,16 @@ const setupDatabaseHandlers = () => {
     }
   });
 
+  // Returns the full sermon data in a single call via the worker thread
+  ipcMain.handle("db:getSermonFull", async (event, uid) => {
+    try {
+      return await sermonDatabase.call('getSermon', uid);
+    } catch (error) {
+      console.error("Error in getSermonFull:", error);
+      throw error;
+    }
+  });
+
   ipcMain.handle("db:getSermonStructure", async (event, uid) => {
     try {
       const result = await sermonDatabase.call('getSermonStructure', uid);
@@ -162,28 +172,6 @@ const setupDatabaseHandlers = () => {
       return await sermonDatabase.call('getSermonSectionData', sermonUid, sectionUids);
     } catch (error) {
       console.error("Error in getSermonSectionData:", error);
-      throw error;
-    }
-  });
-
-  // Streaming sermon loader: pushes structure + section chunks to renderer via events
-  ipcMain.handle("db:loadSermonStreaming", async (event, uid) => {
-    try {
-      const result = await sermonDatabase.callStreaming(
-        'loadSermonStreaming',
-        [uid],
-        (msg) => {
-          if (!event.sender || event.sender.isDestroyed()) return;
-          if (msg.type === 'sermon:structure') {
-            event.sender.send('sermon:structure', { uid, structure: msg.data });
-          } else if (msg.type === 'sermon:chunk') {
-            event.sender.send('sermon:chunk', { uid, data: msg.data, done: msg.done });
-          }
-        }
-      );
-      return result; // null if not found, true if streamed successfully
-    } catch (error) {
-      console.error("Error in loadSermonStreaming:", error);
       throw error;
     }
   });
