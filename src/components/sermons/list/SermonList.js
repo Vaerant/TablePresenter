@@ -25,7 +25,7 @@ export default function SermonList() {
   const [listViewportSize, setListViewportSize] = useState({ width: 0, height: 0 });
   const [scrollTop, setScrollTop] = useState(0);
 
-  const { sermons, activeSermon, setSermons, setActiveSermon, setActiveSermonData } = useSermonStore();
+  const { sermons, activeSermon, setSermons, setActiveSermon } = useSermonStore();
 
   // fetch sermons on mount
   useEffect(() => {
@@ -41,8 +41,7 @@ export default function SermonList() {
   const handleSermonPress = async (sermon) => {
     const sermonData = await sermonSearch.loadSermon(sermon.uid);
     console.log('Selected Sermon:', sermonData);
-    setActiveSermon(sermon);
-    setActiveSermonData(sermonData);
+    setActiveSermon(sermon, sermonData);
   };
 
   const smartSermonSearch = useMemo(() => {

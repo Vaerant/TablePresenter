@@ -250,6 +250,127 @@ class SermonDatabase {
     return structuredSermon;
   }
 
+  /**
+   * Returns lightweight sermon structure: metadata + section/paragraph/block UIDs only (no text).
+   * Used as the first step in chunked loading.
+   */
+  getSermonStructure(uid) {
+    this.ensureInitialized();
+
+    const rows = this.db.prepare(`
+      SELECT 
+        s.id, s.uid, s.title, s.date,
+        sec.uid as section_uid, sec.number as section_number, sec.order_index as section_order,
+        p.uid as paragraph_uid, p.order_index as paragraph_order,
+        b.uid as block_uid, b.order_index as block_order
+      FROM sermons s
+      LEFT JOIN sections sec ON sec.sermon_uid = s.uid
+      LEFT JOIN paragraphs p ON p.section_uid = sec.uid
+      LEFT JOIN blocks b ON b.paragraph_uid = p.uid
+      WHERE s.uid = ?
+      ORDER BY sec.order_index, p.order_index, b.order_index
+    `).all(uid);
+
+    if (!rows || rows.length === 0) return null;
+
+    const first = rows[0];
+    const sermon = {
+      id: first.id,
+      uid: first.uid,
+      title: first.title,
+      date: first.date,
+      orderedSectionIds: [],
+      sections: {}
+    };
+
+    const sectionSet = new Set();
+    const paragraphSet = new Set();
+
+    for (const row of rows) {
+      if (!row.section_uid) continue;
+
+      if (!sectionSet.has(row.section_uid)) {
+        sectionSet.add(row.section_uid);
+        sermon.orderedSectionIds.push(row.section_uid);
+        sermon.sections[row.section_uid] = {
+          number: row.section_number,
+          order: row.section_order,
+          orderedParagraphIds: [],
+          paragraphs: {}
+        };
+      }
+
+      if (!row.paragraph_uid) continue;
+      const pKey = `${row.section_uid}:${row.paragraph_uid}`;
+      if (!paragraphSet.has(pKey)) {
+        paragraphSet.add(pKey);
+        const sec = sermon.sections[row.section_uid];
+        sec.orderedParagraphIds.push(row.paragraph_uid);
+        sec.paragraphs[row.paragraph_uid] = {
+          order: row.paragraph_order,
+          orderedBlockIds: [],
+          blocks: {}  // empty — text loaded later via chunks
+        };
+      }
+
+      if (!row.block_uid) continue;
+      sermon.sections[row.section_uid].paragraphs[row.paragraph_uid].orderedBlockIds.push(row.block_uid);
+    }
+
+    return sermon;
+  }
+
+  /**
+   * Returns full block data (text, type, indented) for the given section UIDs of a sermon.
+   * Each call returns one "chunk" of the sermon.
+   */
+  getSermonSectionData(sermonUid, sectionUids) {
+    this.ensureInitialized();
+    if (!sectionUids || sectionUids.length === 0) return {};
+
+    const placeholders = sectionUids.map(() => '?').join(',');
+    const rows = this.db.prepare(`
+      SELECT
+        sec.uid as section_uid,
+        p.uid as paragraph_uid, p.order_index as paragraph_order,
+        b.uid as block_uid, b.text as block_text, b.type as block_type,
+        b.order_index as block_order, b.indented as block_indented
+      FROM sections sec
+      JOIN paragraphs p ON p.section_uid = sec.uid
+      JOIN blocks b ON b.paragraph_uid = p.uid
+      WHERE sec.sermon_uid = ? AND sec.uid IN (${placeholders})
+      ORDER BY sec.order_index, p.order_index, b.order_index
+    `).all(sermonUid, ...sectionUids);
+
+    // Group into { sectionUid: { paragraphs: { parUid: { blocks: { blockUid: {...} }, orderedBlockIds } } } }
+    const result = {};
+    for (const row of rows) {
+      if (!result[row.section_uid]) {
+        result[row.section_uid] = { paragraphs: {} };
+      }
+      const sec = result[row.section_uid];
+
+      if (!sec.paragraphs[row.paragraph_uid]) {
+        sec.paragraphs[row.paragraph_uid] = {
+          order: row.paragraph_order,
+          blocks: {},
+          orderedBlockIds: []
+        };
+      }
+      const par = sec.paragraphs[row.paragraph_uid];
+
+      par.blocks[row.block_uid] = {
+        text: row.block_text,
+        type: row.block_type,
+        order: row.block_order,
+        indented: !!row.block_indented
+      };
+      par.orderedBlockIds.push(row.block_uid);
+    }
+
+    return result;
+  }
+
   buildSermonHierarchyOptimized(rows) {
     if (!rows || rows.length === 0) return null;
     

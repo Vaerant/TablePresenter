@@ -47,7 +47,7 @@ const useSermonStore = create((set, get) => ({
   setDisplaySettings: (settings) => set({ displaySettings: settings }),
 
   setSermons: (sermons) => set({ sermons: sermons }),
-  setActiveSermon: (sermon) => set({ activeSermon: sermon, activeSermonData: null, selectedParagraph: null, selectedVerses: [] }),
+  setActiveSermon: (sermon, data = null) => set({ activeSermon: sermon, activeSermonData: data, selectedParagraph: null, selectedVerses: [] }),
   setActiveSermonData: (data) => set({ activeSermonData: data }),
 
 }));

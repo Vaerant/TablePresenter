@@ -1,6 +1,7 @@
 export class SermonSearchEngine {
   constructor() {
     this.initialized = false;
+    this._loadId = 0; // Incremented per loadSermon call for stale-load detection
   }
 
   async initialize() {
@@ -18,39 +19,100 @@ export class SermonSearchEngine {
     return window.electronAPI.database.getAllSermons();
   }
 
-  // Load individual sermon structure (converted from blocks)
-  async loadSermon(uid) {
+  /**
+   * Load a sermon via streaming: the backend worker thread pushes
+   * the skeleton structure first, then section-data chunks via events.
+   * This avoids multiple IPC round-trips and keeps the main process free.
+   *
+   * @param {string}   uid          Sermon UID
+   * @param {Function} [onProgress] Optional callback invoked after each chunk
+   *                                with a shallow copy of the sermon-so-far.
+   */
+  async loadSermon(uid, onProgress = null) {
+    const loadId = ++this._loadId;
+
     try {
       await this.initialize();
-      
-      const sermon = await window.electronAPI.database.getSermon(uid);
-      
-      if (!sermon) return null;
 
-      // The sermon already contains all blocks in its hierarchical structure
-      // Build blockIndex for compatibility if needed
-      const sermonStructure = {
-        ...sermon,
-        blockIndex: {}
-      };
+      return await new Promise((resolve, reject) => {
+        let sermon = null;
+        let resolved = false;
+        let removeStructure, removeChunk;
 
-      // Extract blocks from the hierarchical structure if you need the flat blockIndex
-      Object.values(sermon.sections).forEach(section => {
-        Object.entries(section.paragraphs).forEach(([paragraphId, paragraph]) => {
-          Object.entries(paragraph.blocks).forEach(([blockId, block]) => {
-            sermonStructure.blockIndex[blockId] = {
-              text: block.text,
-              type: block.type,
-              sectionId: section.uid || Object.keys(sermon.sections).find(sId => sermon.sections[sId] === section),
-              paragraphId: paragraphId,
-              order: block.order,
-              indented: block.indented
-            };
-          });
+        const cleanup = () => {
+          if (removeStructure) removeStructure();
+          if (removeChunk) removeChunk();
+        };
+
+        const finish = (value) => {
+          if (resolved) return;
+          resolved = true;
+          cleanup();
+          resolve(value);
+        };
+
+        const isStale = () => this._loadId !== loadId;
+
+        // --- Listen for the skeleton structure ---
+        removeStructure = window.electronAPI.database.onSermonStructure(({ uid: sUid, structure }) => {
+          if (sUid !== uid) return;
+          if (isStale()) { cleanup(); return; }
+
+          if (!structure) {
+            finish(null);
+            return;
+          }
+          sermon = { ...structure, blockIndex: {} };
+          if (onProgress) onProgress({ ...sermon });
         });
-      });
 
-      return sermonStructure;
+        // --- Listen for section-data chunks ---
+        removeChunk = window.electronAPI.database.onSermonChunk(({ uid: cUid, data, done }) => {
+          if (cUid !== uid || !sermon) return;
+          if (isStale()) { if (done) cleanup(); return; }
+
+          // Merge chunk data into the sermon
+          for (const [sectionUid, sectionData] of Object.entries(data || {})) {
+            const sec = sermon.sections[sectionUid];
+            if (!sec) continue;
+            for (const [parId, parData] of Object.entries(sectionData.paragraphs || {})) {
+              if (sec.paragraphs[parId]) {
+                sec.paragraphs[parId].blocks = parData.blocks;
+                sec.paragraphs[parId].orderedBlockIds = parData.orderedBlockIds;
+
+                // Build flat blockIndex entries
+                for (const [blockId, block] of Object.entries(parData.blocks || {})) {
+                  sermon.blockIndex[blockId] = {
+                    text: block.text,
+                    type: block.type,
+                    sectionId: sectionUid,
+                    paragraphId: parId,
+                    order: block.order,
+                    indented: block.indented
+                  };
+                }
+              }
+            }
+          }
+
+          if (onProgress) onProgress({ ...sermon });
+
+          if (done) {
+            finish(sermon);
+          }
+        });
+
+        // Kick off the streaming load (main process forwards worker events)
+        window.electronAPI.database.loadSermonStreaming(uid).catch((err) => {
+          if (!resolved) {
+            cleanup();
+            reject(err);
+          }
+        });
+
+        // Safety timeout: resolve with null if no response in 15 s
+        setTimeout(() => finish(null), 15000);
+      });
     } catch (error) {
       console.error(`Failed to load sermon ${uid}:`, error);
       return null;

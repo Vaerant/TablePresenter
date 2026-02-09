@@ -8,11 +8,13 @@ import { ParagraphView, BlockView } from './ParagraphViews'; // NEW
 const SermonView = () => {
   const {
     activeSermon,
+    activeSermonData,
     selectedParagraph,
     displaySettings,
     setSelectedParagraph,
     clearSelectedParagraph,
-    clearSelectedVerses
+    clearSelectedVerses,
+    setActiveSermonData
   } = useSermonStore();
 
   const [sermonData, setSermonData] = useState(null);
@@ -41,6 +43,12 @@ const SermonView = () => {
         return;
       }
       
+      // If activeSermonData is already in the store (set by SermonList/SearchModal), use it
+      if (activeSermonData && activeSermonData.sections && activeSermonData.orderedSectionIds) {
+        if (mounted) setSermonData(activeSermonData);
+        return;
+      }
+
       // If activeSermon already has sections, use it immediately
       if (activeSermon.sections && activeSermon.orderedSectionIds) {
         if (mounted) setSermonData(activeSermon);
@@ -56,6 +64,7 @@ const SermonView = () => {
           const loaded = await sermonSearch.loadSermon(activeSermon.uid);
           if (mounted && loaded) {
             setSermonData(loaded);
+            setActiveSermonData(loaded);
           }
         };
         
@@ -75,7 +84,7 @@ const SermonView = () => {
     return () => {
       mounted = false;
     };
-  }, [activeSermon]);
+  }, [activeSermon, activeSermonData]);
 
   // Build ordered sections and a flat list of all paragraphs for navigation
   const orderedSections = useMemo(() => {

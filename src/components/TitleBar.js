@@ -61,12 +61,16 @@ export default function TitleBar() {
 
   return (
     <div
-      className={`header-drag h-[38px] w-full flex items-center justify-between text-white select-none !bg-neutral-900/60
-        ${path === '/' ? 'bg-neutral-900/60' : 'bg-neutral-800'}
+      className={`header-drag h-[38px] w-full flex items-center justify-between text-white select-none
+        ${path === '/' ? 'bg-neutral-900/60' : 'bg-neutral-900'}
         `}
+      // className={`header-drag h-[38px] w-full flex items-center justify-between text-white select-none !bg-neutral-900/60
+      //   ${path === '/' ? 'bg-neutral-900/60' : 'bg-neutral-800'}
+      //   `}
       onDoubleClick={toggleMaximize}
     >
-      <div className="text-xs text-neutral-600 ml-3 hidden sm:block">Message Presenter</div>
+      {/* <div className="text-xs text-neutral-600 ml-3 hidden sm:block">Message Presenter</div> */}
+      <div className="text-xs text-neutral-600 ml-3 hidden sm:block">Message Presenter, path: {path}</div>
 
       <div className="flex items-center justify-end grow gap-1 h-full">
         <button

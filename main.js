@@ -4,6 +4,7 @@ const http = require("http");
 const WebSocket = require("ws");
 const os = require("os");
 const fs = require("fs").promises;
+const { Worker } = require("worker_threads");
 
 let appServe = null;
 let sermonDatabase = null;
@@ -14,16 +15,101 @@ let mainWindow = null;
 // Add sermon preloading cache
 let isPreloading = false;
 
+/**
+ * Proxy that forwards all SermonDatabase calls to a worker thread.
+ * This keeps the main Electron thread free so the UI never freezes
+ * during heavy SQLite reads.
+ */
+class SermonDatabaseProxy {
+  constructor() {
+    this.worker = null;
+    this.pending = new Map();
+    this.nextId = 0;
+  }
+
+  initialize() {
+    return new Promise((resolve, reject) => {
+      this.worker = new Worker(
+        path.join(__dirname, 'database-table-worker.js')
+      );
+
+      const onReady = (msg) => {
+        if (msg.type === 'ready') {
+          this.worker.off('message', onReady);
+          this._setupHandler();
+          resolve();
+        } else if (msg.type === 'init-error') {
+          reject(new Error(msg.error));
+        }
+      };
+
+      this.worker.on('message', onReady);
+      this.worker.on('error', reject);
+    });
+  }
+
+  _setupHandler() {
+    this.worker.on('message', (msg) => {
+      const p = this.pending.get(msg.id);
+      if (!p) return;
+
+      switch (msg.type) {
+        case 'result':
+          this.pending.delete(msg.id);
+          p.resolve(msg.result);
+          break;
+        case 'error':
+          this.pending.delete(msg.id);
+          p.reject(new Error(msg.error));
+          break;
+        case 'sermon:structure':
+          if (p.onStream) p.onStream(msg);
+          if (msg.done) { this.pending.delete(msg.id); p.resolve(null); }
+          break;
+        case 'sermon:chunk':
+          if (p.onStream) p.onStream(msg);
+          if (msg.done) { this.pending.delete(msg.id); p.resolve(true); }
+          break;
+      }
+    });
+  }
+
+  /** Generic async call – works for any SermonDatabase method */
+  call(method, ...args) {
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      this.pending.set(id, { resolve, reject });
+      this.worker.postMessage({ id, method, args });
+    });
+  }
+
+  /** Streaming call – onStream receives intermediate messages */
+  callStreaming(method, args, onStream) {
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      this.pending.set(id, { resolve, reject, onStream });
+      this.worker.postMessage({ id, method, args });
+    });
+  }
+
+  close() {
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+    this.pending.clear();
+  }
+}
+
 // Initialize databases in main process
 const initializeDatabases = async () => {
   try {
-    const { SermonDatabase } = require("./database-table.js");
     const { BibleDatabase } = require("./database-bible.js");
     const { SystemDatabase } = require("./database-system.js");
 
-    sermonDatabase = new SermonDatabase();
+    sermonDatabase = new SermonDatabaseProxy();
     await sermonDatabase.initialize();
-    console.log("Sermon database initialized successfully");
+    console.log("Sermon database initialized successfully (worker thread)");
 
     bibleDatabase = new BibleDatabase();
     await bibleDatabase.initialize();
@@ -42,9 +128,7 @@ const initializeDatabases = async () => {
 const setupDatabaseHandlers = () => {
   ipcMain.handle("db:getAllSermons", async () => {
     try {
-      const result = await sermonDatabase.getAllSermons();
-
-      return result;
+      return await sermonDatabase.call('getAllSermons');
     } catch (error) {
       console.error("Error in getAllSermons:", error);
       throw error;
@@ -53,12 +137,53 @@ const setupDatabaseHandlers = () => {
 
   ipcMain.handle("db:getSermon", async (event, uid) => {
     try {
-  
-      const result = await sermonDatabase.getSermon(uid);
-
-      return result;
+      await sermonDatabase.call('getSermon', uid);
+      console.log("Sermon data retrieved successfully for UID:", uid);
+      return {};
     } catch (error) {
       console.error("Error in getSermon:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("db:getSermonStructure", async (event, uid) => {
+    try {
+      const result = await sermonDatabase.call('getSermonStructure', uid);
+      console.log("Sermon structure retrieved for UID:", uid);
+      return result;
+    } catch (error) {
+      console.error("Error in getSermonStructure:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("db:getSermonSectionData", async (event, sermonUid, sectionUids) => {
+    try {
+      return await sermonDatabase.call('getSermonSectionData', sermonUid, sectionUids);
+    } catch (error) {
+      console.error("Error in getSermonSectionData:", error);
+      throw error;
+    }
+  });
+
+  // Streaming sermon loader: pushes structure + section chunks to renderer via events
+  ipcMain.handle("db:loadSermonStreaming", async (event, uid) => {
+    try {
+      const result = await sermonDatabase.callStreaming(
+        'loadSermonStreaming',
+        [uid],
+        (msg) => {
+          if (!event.sender || event.sender.isDestroyed()) return;
+          if (msg.type === 'sermon:structure') {
+            event.sender.send('sermon:structure', { uid, structure: msg.data });
+          } else if (msg.type === 'sermon:chunk') {
+            event.sender.send('sermon:chunk', { uid, data: msg.data, done: msg.done });
+          }
+        }
+      );
+      return result; // null if not found, true if streamed successfully
+    } catch (error) {
+      console.error("Error in loadSermonStreaming:", error);
       throw error;
     }
   });
@@ -67,7 +192,7 @@ const setupDatabaseHandlers = () => {
     "db:searchSermons",
     async (event, query, limit, type = "phrase", sermonUid = null, page = 1) => {
       try {
-        return await sermonDatabase.search(query, limit, type, sermonUid, page);
+        return await sermonDatabase.call('search', query, limit, type, sermonUid, page);
       } catch (error) {
         console.error("Error in searchSermons:", error);
         throw error;
@@ -324,10 +449,7 @@ app.on("ready", async () => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    // Close servers when app closes
-    // if (httpServer) {
-    //   httpServer.close();
-    // }
+    if (sermonDatabase) sermonDatabase.close();
     app.quit();
   }
 });
