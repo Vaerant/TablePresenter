@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@zilliz/milvus2-sdk-node": "^2.6.0",
+    "axios": "^1.12.2",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "hnswlib-node": "^3.0.0",
+    "openai": "^5.23.0",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
+  }
+}

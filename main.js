@@ -87,8 +87,8 @@ class SermonDatabaseProxy {
 // Initialize databases in main process
 const initializeDatabases = async () => {
   try {
-    const { BibleDatabase } = require("./database-bible.js");
-    const { SystemDatabase } = require("./database-system.js");
+    const { BibleDatabase } = require("./api/database-bible.js");
+    const { SystemDatabase } = require("./api/database-system.js");
 
     sermonDatabase = new SermonDatabaseProxy();
     await sermonDatabase.initialize();
