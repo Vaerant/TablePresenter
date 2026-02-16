@@ -46,8 +46,8 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="w-full md:w-fit h-full p-4 py-8 pb-16 flex flex-col items-center gap-3 lg:mr-12">
-          <div className={`grow w-[400px] max-w-[90%] overflow-hidden text-base text-center rounded-lg hover:bg-neutral-700/60 active:bg-neutral-700/50 flex items-center justify-center gap-2.5 select-none relative transition-all duration-100
+        <div className="w-full md:w-fit h-full p-4 py-8 pb-16 flex flex-col items-center justify-center gap-3 lg:mr-12">
+          <div className={`grow w-[400px] max-w-[90%] max-h-[175px] overflow-hidden text-base text-center rounded-lg hover:bg-neutral-700/60 active:bg-neutral-700/50 flex items-center justify-center gap-2.5 select-none relative transition-all duration-100
               ${activeView == 'BIBLE' ? 'bg-neutral-700/40 hover:bg-neutral-700/40' : 'bg-neutral-800/40'}
               `}
             onClick={() => { setActiveView('BIBLE'); router.push('/bible'); }}
@@ -55,7 +55,7 @@ export default function Home() {
             <RiCrossFill className="sm:-ml-3.5" size={18} />
             <p className='hidden sm:block'>Bible</p>
           </div>
-          <div className={`grow w-[400px] max-w-[90%] overflow-hidden text-base text-center rounded-lg hover:bg-neutral-700/60 active:bg-neutral-700/50 flex items-center justify-center gap-2.5 select-none relative transition-all duration-100
+          <div className={`grow w-[400px] max-w-[90%] max-h-[175px] overflow-hidden text-base text-center rounded-lg hover:bg-neutral-700/60 active:bg-neutral-700/50 flex items-center justify-center gap-2.5 select-none relative transition-all duration-100
               ${activeView == 'SERMONS' ? 'bg-neutral-700/40 hover:bg-neutral-700/40' : 'bg-neutral-800/40'}
               `}
             onClick={() => { setActiveView('SERMONS'); router.push('/bible'); }}
@@ -63,7 +63,7 @@ export default function Home() {
             <LuWheat className="sm:-ml-3.5" size={18} />
             <p className='hidden sm:block'>Tapes</p>
           </div>
-          <div className={`grow w-[400px] max-w-[90%] overflow-hidden text-base text-center rounded-lg hover:bg-neutral-700/60 active:bg-neutral-700/50 flex items-center justify-center gap-2.5 select-none relative transition-all duration-100
+          <div className={`grow w-[400px] max-w-[90%] max-h-[175px] overflow-hidden text-base text-center rounded-lg hover:bg-neutral-700/60 active:bg-neutral-700/50 flex items-center justify-center gap-2.5 select-none relative transition-all duration-100
               ${activeView == 'STREAMING' ? 'bg-neutral-700/40 hover:bg-neutral-700/40' : 'bg-neutral-800/40'}
               `}
             onClick={() => { setActiveView('STREAMING'); router.push('/bible'); }}

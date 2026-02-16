@@ -48,5 +48,7 @@ zilliz_block_uids.json
 */info
 */export
 /export
+/bloat/side/export
+*/bloat/side/export
 *.db
 *.sqlite

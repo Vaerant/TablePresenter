@@ -35,8 +35,10 @@ export default function BibleList() {
 
   // fetch books on mount
   useEffect(() => {
+    console.log('BibleList mounted, current books:', books);
     if (books.length > 0) return; // already have books
     const fetchBooks = async () => {
+      console.log('Fetching books from API...');
       const results = await bibleSearch.getAllBooks();
       console.log('Fetched books:', results);
       setBooks(results);

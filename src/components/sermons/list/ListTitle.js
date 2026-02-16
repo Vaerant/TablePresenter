@@ -13,25 +13,27 @@ const ListTitle = forwardRef(({ data, onPress, isActive = false, isSelected = fa
   };
 
   return (
-    <div ref={isSelected ? ref : null} className={`flex flex-col h-full`}>
+    <div ref={isSelected ? ref : null} className={`flex flex-col h-[84px]`}>
       <div 
         className={`flex items-stretch cursor-pointer h-full`}
         onClick={handleSermonClick}
       >
-        <div className={`flex-1 flex flex-col justify-center min-w-0 h-full bg-neutral-900 border-b border-neutral-800 p-2 px-3 rounded
-            ${
-            isActive ? '!bg-neutral-700/60' : ''
-            }
-            ${
-            isSelected
-              ? 'ring-1 ring-neutral-500/60'
-              : 'hover:bg-neutral-800'
-            }
-          `}>
-          <h3 className={`font-medium text-white`} title={(data?.title ?? '').toString()}>
-            {(data?.title ?? '').toString()}
-          </h3>
-          <p className="text-sm text-gray-400" title={(data?.date ?? '').toString()}>{(data?.date ?? '').toString()}</p>
+        <div className={`flex-1 flex flex-col justify-center min-w-0 h-full border-b border-neutral-800 pb-0.5 rounded`}>
+          <div className={`flex-1 w-full p-2 px-3 flex flex-col justify-center min-w-0 h-full bg-neutral-900 rounded
+              ${
+              isActive ? '!bg-neutral-700/60' : ''
+              }
+              ${
+              isSelected
+                ? 'ring-1 ring-neutral-500/60'
+                : 'hover:bg-neutral-800'
+              }
+            `}>
+            <h3 className={`font-medium text-white`} title={(data?.title ?? '').toString()}>
+              {(data?.title ?? '').toString()}
+            </h3>
+            <p className="text-sm text-gray-400" title={(data?.date ?? '').toString()}>{(data?.date ?? '').toString()}</p>
+          </div>
         </div>
       </div>
     </div>

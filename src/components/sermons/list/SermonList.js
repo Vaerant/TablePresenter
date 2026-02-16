@@ -12,7 +12,7 @@ import SearchModal from './SearchModal';
 
 export default function SermonList() {
 
-  const ROW_HEIGHT = 84;
+  const ROW_HEIGHT = 86;
   const OVERSCAN = 10;
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -377,7 +377,7 @@ export default function SermonList() {
         <div
           ref={listViewportRef}
           onScroll={handleListScroll}
-          className="flex-1 min-h-0 overflow-y-auto dark-scroll px-2"
+          className="flex-1 min-h-0 overflow-y-auto dark-scroll px-2 pt-3 -mt-3"
         >
           <div style={{ height: virtualization.totalHeight, position: 'relative' }}>
             <div

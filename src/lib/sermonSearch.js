@@ -1,40 +1,21 @@
 export class SermonSearchEngine {
-  constructor() {
-    this.initialized = false;
-  }
-
-  async initialize() {
-    if (this.initialized) return;
-    
-    // Check if running in Electron
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      this.isElectron = true;
-      this.initialized = true;
-    }
+  constructor(baseUrl = 'http://localhost:3001') {
+    this.baseUrl = baseUrl;
   }
 
   async getSermons() {
-    await this.initialize();    
-    return window.electronAPI.database.getAllSermons();
+    const resp = await fetch(`${this.baseUrl}/api/message/sermons`);
+    if (!resp.ok) throw new Error('Failed to fetch sermons');
+    return resp.json();
   }
 
-  /**
-   * Load a full sermon in a single call.
-   * The DB query runs in a worker thread so it never blocks the UI.
-   * Data arrives as a pre-cached JSON string (fast memcpy across IPC)
-   * and is parsed here in the renderer.
-   */
   async loadSermon(uid) {
     try {
-      await this.initialize();
+      const resp = await fetch(`${this.baseUrl}/api/message/sermons/${encodeURIComponent(uid)}`);
+      if (!resp.ok) return null;
+      const sermon = await resp.json();
+      if (!sermon) return null;
 
-      const raw = await window.electronAPI.database.getSermonFull(uid);
-      if (!raw) return null;
-
-      // raw is a JSON string from the worker (avoids structured-clone overhead)
-      const sermon = typeof raw === 'string' ? JSON.parse(raw) : raw;
-
-      // Build flat blockIndex for compatibility
       const sermonStructure = { ...sermon, blockIndex: {} };
 
       for (const [sectionId, section] of Object.entries(sermon.sections || {})) {
@@ -59,13 +40,23 @@ export class SermonSearchEngine {
     }
   }
 
-  // Basic text search - return raw results for easier processing
   async search(query, limit = 50, type = 'phrase', sermonUid = null, page = 1) {
-    await this.initialize();
-    let preparedQuery = query?.trim() || '';
+    const resp = await fetch(`${this.baseUrl}/api/message/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: String(query ?? '').trim(),
+        limit,
+        type,
+        sermonUid,
+        page
+      })
+    });
 
-    const resp = await window.electronAPI.database.search(preparedQuery, limit, type, sermonUid, page);
-    const rows = resp?.data || [];
+    if (!resp.ok) throw new Error('Failed to search sermons');
+    const result = await resp.json();
+
+    const rows = result?.data || [];
     const data = rows.map(result => ({
       uid: result.uid,
       paragraph_uid: result.uid || result.paragraph_uid,
@@ -83,11 +74,9 @@ export class SermonSearchEngine {
       sermon_date: result.sermon_date,
     }));
 
-    return { data, pagination: resp?.pagination || null };
+    return { data, pagination: result?.pagination || null };
   }
 
-  // Back-compat name used by SearchModal and API routes.
-  // Returns { data, pagination }.
   async searchText(query, limit = 50, searchMode = 'phrase', sermonUid = null, page = 1) {
     const type = (searchMode === 'general' || searchMode === 'phrase' || searchMode === 'similar')
       ? searchMode
@@ -95,16 +84,18 @@ export class SermonSearchEngine {
     return this.search(query, limit, type, sermonUid, page);
   }
 
-  // 2. Search by sermon metadata using SQLite
   async searchSermons(filters = {}) {
-    await this.initialize();
-    
-    if (this.isElectron) {
-      return window.electronAPI.database.searchSermons(filters);
-    }
-    return this.database.searchSermons(filters);
+    const params = new URLSearchParams();
+    Object.entries(filters || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        params.set(key, String(value));
+      }
+    });
+
+    const resp = await fetch(`${this.baseUrl}/api/message/sermon-summaries${params.toString() ? `?${params.toString()}` : ''}`);
+    if (!resp.ok) throw new Error('Failed to search sermon summaries');
+    return resp.json();
   }
 }
 
-// Export singleton instance
 export const sermonSearch = new SermonSearchEngine();

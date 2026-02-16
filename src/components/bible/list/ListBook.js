@@ -6,7 +6,7 @@ import { MdChevronRight } from "react-icons/md";
 import useSermonStore from '@/stores/sermonStore';
 
 const ListBook = forwardRef(({ data, onPress, onChapterPress, isActive = false, isSelected = false }, ref) => {
-  const { currentChapter } = useSermonStore();
+  const { activeChapter } = useSermonStore();
   const [isExpanded, setIsExpanded] = useState(false);
 
   const handleBookClick = () => {
@@ -67,7 +67,7 @@ const ListBook = forwardRef(({ data, onPress, onChapterPress, isActive = false, 
                 key={chapterNum}
                 onClick={(e) => handleChapterClick(chapterNum, e)}
                 className={`flex-1 min-w-[4.5rem] min-h-10 text-sm text-center rounded hover:bg-neutral-700/60 ${
-                chapterNum === currentChapter && isActive
+                chapterNum === activeChapter && isActive
                   ? 'bg-white text-black font-bold hover:bg-white' 
                   : 'bg-neutral-800/40'
               }`}

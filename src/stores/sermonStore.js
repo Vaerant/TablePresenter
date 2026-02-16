@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 const useSermonStore = create((set, get) => ({
 
-  activeView: 'HOME',
+  activeView: 'BIBLE',
 
   books: [],
   activeBook: null,
