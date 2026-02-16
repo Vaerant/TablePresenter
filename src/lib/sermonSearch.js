@@ -21,13 +21,18 @@ export class SermonSearchEngine {
   /**
    * Load a full sermon in a single call.
    * The DB query runs in a worker thread so it never blocks the UI.
+   * Data arrives as a pre-cached JSON string (fast memcpy across IPC)
+   * and is parsed here in the renderer.
    */
   async loadSermon(uid) {
     try {
       await this.initialize();
 
-      const sermon = await window.electronAPI.database.getSermonFull(uid);
-      if (!sermon) return null;
+      const raw = await window.electronAPI.database.getSermonFull(uid);
+      if (!raw) return null;
+
+      // raw is a JSON string from the worker (avoids structured-clone overhead)
+      const sermon = typeof raw === 'string' ? JSON.parse(raw) : raw;
 
       // Build flat blockIndex for compatibility
       const sermonStructure = { ...sermon, blockIndex: {} };

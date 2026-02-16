@@ -62,14 +62,6 @@ class SermonDatabaseProxy {
           this.pending.delete(msg.id);
           p.reject(new Error(msg.error));
           break;
-        case 'sermon:structure':
-          if (p.onStream) p.onStream(msg);
-          if (msg.done) { this.pending.delete(msg.id); p.resolve(null); }
-          break;
-        case 'sermon:chunk':
-          if (p.onStream) p.onStream(msg);
-          if (msg.done) { this.pending.delete(msg.id); p.resolve(true); }
-          break;
       }
     });
   }
@@ -79,15 +71,6 @@ class SermonDatabaseProxy {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       this.pending.set(id, { resolve, reject });
-      this.worker.postMessage({ id, method, args });
-    });
-  }
-
-  /** Streaming call – onStream receives intermediate messages */
-  callStreaming(method, args, onStream) {
-    return new Promise((resolve, reject) => {
-      const id = this.nextId++;
-      this.pending.set(id, { resolve, reject, onStream });
       this.worker.postMessage({ id, method, args });
     });
   }
@@ -146,10 +129,11 @@ const setupDatabaseHandlers = () => {
     }
   });
 
-  // Returns the full sermon data in a single call via the worker thread
+  // Returns the full sermon data as a JSON string via the worker thread.
+  // Transferring a string avoids expensive structured-clone of nested objects.
   ipcMain.handle("db:getSermonFull", async (event, uid) => {
     try {
-      return await sermonDatabase.call('getSermon', uid);
+      return await sermonDatabase.call('getSermonFast', uid);
     } catch (error) {
       console.error("Error in getSermonFull:", error);
       throw error;
