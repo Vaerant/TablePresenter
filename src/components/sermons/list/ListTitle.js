@@ -13,12 +13,12 @@ const ListTitle = forwardRef(({ data, onPress, isActive = false, isSelected = fa
   };
 
   return (
-    <div ref={isSelected ? ref : null} className={`flex flex-col h-[84px]`}>
+    <div ref={isSelected ? ref : null} className={`flex flex-col h-[82px]`}>
       <div 
         className={`flex items-stretch cursor-pointer h-full`}
         onClick={handleSermonClick}
       >
-        <div className={`flex-1 flex flex-col justify-center min-w-0 h-full border-b border-neutral-800 pb-0.5 rounded`}>
+        <div className={`flex-1 flex flex-col justify-center min-w-0 h-full border-b border-neutral-800 pb-1 rounded`}>
           <div className={`flex-1 w-full p-2 px-3 flex flex-col justify-center min-w-0 h-full bg-neutral-900 rounded
               ${
               isActive ? '!bg-neutral-700/60' : ''

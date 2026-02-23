@@ -1,25 +1,6 @@
-import React, { forwardRef, useState, useEffect } from 'react';
-import useSermonStore from '@/stores/sermonStore';
+import React, { forwardRef, memo } from 'react';
 
-import './VerseView.css';
-
-const VerseView = forwardRef(({ verse, isSelected, onVerseClick }, ref) => {
-  const [fadeState, setFadeState] = useState('hidden'); // 'hidden', 'visible', 'fading'
-
-  const isHighlighted = false;
-
-  useEffect(() => {
-    if (isHighlighted) {
-      setFadeState('visible');
-      const timeout = setTimeout(() => {
-        setFadeState('fading');
-      }, 2000); // Show for 2 seconds, then fade out
-
-      return () => clearTimeout(timeout);
-    } else {
-      setFadeState('hidden');
-    }
-  }, [isHighlighted]);
+const VerseView = memo(forwardRef(({ verse, isSelected, isHighlighted, onVerseClick }, ref) => {
 
   const parseVerseText = (text) => {
     const parts = [];
@@ -66,38 +47,49 @@ const VerseView = forwardRef(({ verse, isSelected, onVerseClick }, ref) => {
     onVerseClick(verse, e.ctrlKey || e.metaKey, e.shiftKey);
   };
 
-  const baseClasses = 'inline-block duration-500';
-  const selectionClasses = `cursor-pointer select-none px-3 border-l-0 transition-none ${
-    isSelected 
-        ? 'bg-blue-600/10 bg-opacity-30 rounded hover:bg-blue-600/20 border-transparent'
-        : 'hover:bg-neutral-800 rounded border-transparent'
-  }`;
-
   return (
-    <div className="flex mr-1 mb-1">
-      <div className={`${isHighlighted ? `${fadeState === 'visible' ? 'bg-[#111] w-8 border-l !border-neutral-500' : fadeState === 'fading' ? 'w-0 border-l-0 border-transparent' : ''} duration-500` : ''} w-0 border-transparent transition-all`}></div>
+    <div 
+      className={`rounded-md cursor-pointer group transition-[margin] hover:!bg-neutral-800/60
+        ${isHighlighted ? 'ml-2' : 'ml-0'} 
+        ${isHighlighted && !isSelected ? 'bg-neutral-800/60' : ''}
+        ${isSelected ? 'bg-blue-800/10' : isHighlighted ? '' : 'hover:bg-neutral-800/60'} 
+        p-2`}
+      onClick={handleClick}
+    >
       <span
         ref={ref}
         data-verse={verse.verse}
-        className={`${baseClasses} ${selectionClasses} verse-view py-1`}
-        onClick={handleClick}
+        className={`py-1`}
       >
-        <span className={`text-sm font-semibold mr-1 ${
-          isSelected 
-            ? 'text-white' 
-            : 'text-blue-400'
-        }`}>
+        <span 
+          className={`text-sm font-semibold mr-2 ${
+            isSelected 
+              ? 'text-blue-400' 
+              : 'text-blue-400'
+          }`}
+        >
           {verse.verse}
         </span>
-        <span className={`${
-          isSelected 
-            ? 'text-blue-500' 
-            : 'text-white/70'
-        } verse-text`}>
+        <span 
+          className={`text-base text-white/70 group-hover:text-white leading-7
+            ${isHighlighted && !isSelected ? '!text-blue-300' : ''}
+            ${isSelected ? '!text-blue-500' : ''}
+          `}
+        >
           {parseVerseText(verse.text)}
         </span>
       </span>
     </div>
+  );
+}), (prevProps, nextProps) => {
+  // Custom comparison function to prevent unnecessary re-renders
+  return (
+    prevProps.verse.verse === nextProps.verse.verse &&
+    prevProps.verse.chapter === nextProps.verse.chapter &&
+    prevProps.isSelected === nextProps.isSelected &&
+    prevProps.isHighlighted === nextProps.isHighlighted &&
+    prevProps.verse.text === nextProps.verse.text &&
+    prevProps.onVerseClick === nextProps.onVerseClick
   );
 });
 

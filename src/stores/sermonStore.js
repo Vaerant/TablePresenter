@@ -16,6 +16,8 @@ const useSermonStore = create((set, get) => ({
 
   // Sermon selection state
   selectedParagraph: null,
+  selectedParagraphs: [],
+  selectedBlocks: [],
 
   // Display settings (used when broadcasting to presenter window)
   displaySettings: {
@@ -43,6 +45,8 @@ const useSermonStore = create((set, get) => ({
   setHighlightedVerses: (verses) => set({ highlightedVerses: verses }),
 
   setSelectedParagraph: (paragraph) => set({ selectedParagraph: paragraph, selectedVerses: [] }),
+  setSelectedParagraphs: (paragraphs) => set({ selectedParagraphs: paragraphs }),
+  setSelectedBlocks: (blocks) => set({ selectedBlocks: blocks }),
   clearSelectedParagraph: () => set({ selectedParagraph: null }),
   setDisplaySettings: (settings) => set({ displaySettings: settings }),
 

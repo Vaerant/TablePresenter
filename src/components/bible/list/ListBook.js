@@ -5,7 +5,17 @@ import { MdChevronRight } from "react-icons/md";
 
 import useSermonStore from '@/stores/sermonStore';
 
-const ListBook = forwardRef(({ data, onPress, onChapterPress, isActive = false, isSelected = false }, ref) => {
+const ListBook = forwardRef(({
+  data,
+  onPress,
+  onChapterPress,
+  isActive = false,
+  isSelected = false,
+  isSmartSelected = false,
+  forceExpanded = false,
+  forceCollapsed = false,
+  highlightChapter = null,
+}, ref) => {
   const { activeChapter } = useSermonStore();
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -26,22 +36,29 @@ const ListBook = forwardRef(({ data, onPress, onChapterPress, isActive = false, 
 
   const chapters = data.chapters ? Object.keys(data.chapters).map(Number).sort((a, b) => a - b) : [];
 
+  const isHighlighted = isSelected || isSmartSelected;
+
+  useEffect(() => {
+    if (forceExpanded) {
+      setIsExpanded(true);
+      return;
+    }
+    if (forceCollapsed) {
+      setIsExpanded(false);
+    }
+  }, [forceExpanded, forceCollapsed]);
+
   return (
-    <div ref={isSelected ? ref : null} className={`flex flex-col px-2`}>
-      <div 
-        className={`flex items-center cursor-pointer`}
+    <div ref={isHighlighted ? ref : null} className="flex flex-col px-2">
+      <div
+        className="flex items-center cursor-pointer"
         onClick={handleBookClick}
       >
-        <div className={`flex-1 p-2 px-3 rounded flex items-center justify-between bg-neutral-900 border border-neutral-900
-            ${
-            isActive ? '!bg-neutral-700/60' : ''
-            }
-            ${
-            isSelected
-              ? '!border-neutral-500/50'
-              : 'hover:bg-neutral-800'
-            }
-          `}>
+        <div className="flex-1 flex flex-col justify-center min-w-0 border-b border-neutral-800 py-1 rounded">
+          <div className={`flex-1 p-2 px-3 rounded flex items-center justify-between min-w-0 bg-neutral-900
+              ${isActive ? '!bg-neutral-700/60' : ''}
+              ${isHighlighted ? 'ring-1 ring-neutral-500/60' : 'hover:bg-neutral-800'}
+            `}>
           <h3 className={`font-medium text-white`}>
             {data.name}
           </h3>
@@ -56,6 +73,7 @@ const ListBook = forwardRef(({ data, onPress, onChapterPress, isActive = false, 
               />
             </button>
           )}
+          </div>
         </div>
       </div>
       
@@ -69,7 +87,9 @@ const ListBook = forwardRef(({ data, onPress, onChapterPress, isActive = false, 
                 className={`flex-1 min-w-[4.5rem] min-h-10 text-sm text-center rounded hover:bg-neutral-700/60 ${
                 chapterNum === activeChapter && isActive
                   ? 'bg-white text-black font-bold hover:bg-white' 
-                  : 'bg-neutral-800/40'
+                  : chapterNum === highlightChapter
+                    ? 'bg-neutral-700/40 ring-1 ring-neutral-500/40'
+                    : 'bg-neutral-800/40'
               }`}
               >
                 {chapterNum}

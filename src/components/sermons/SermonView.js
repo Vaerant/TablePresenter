@@ -1,38 +1,45 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import useSermonStore from '@/stores/sermonStore';
 import { sermonSearch } from '@/lib/sermonSearch';
-import { FiChevronLeft, FiChevronRight } from 'react-icons/fi';
+import { FiChevronLeft, FiChevronRight, FiCopy, FiCheck } from 'react-icons/fi';
 import { FaCaretUp, FaCaretDown } from 'react-icons/fa';
 import { ParagraphView, BlockView } from './ParagraphViews'; // NEW
+import { LuTextSelect } from "react-icons/lu";
+import { PiSelectionAll } from "react-icons/pi";
 
 const SermonView = () => {
   const {
     activeSermon,
     activeSermonData,
-    selectedParagraph,
+    selectedParagraphs,
+    selectedBlocks,
     displaySettings,
-    setSelectedParagraph,
-    clearSelectedParagraph,
+    setSelectedParagraphs,
+    setSelectedBlocks,
     clearSelectedVerses,
     setActiveSermonData
   } = useSermonStore();
+  console.log('Active sermon data in SermonView:', activeSermonData);
 
   const [sermonData, setSermonData] = useState(null);
   const [showSectionPopover, setShowSectionPopover] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [highlightedParagraphId, setHighlightedParagraphId] = useState(null);
-  const [blockSelectionMode, setBlockSelectionMode] = useState(false);
-  const [selectedBlockId, setSelectedBlockId] = useState(null);
-  const [selectedParagraphIds, setSelectedParagraphIds] = useState([]);
-  const [lastParagraphIndex, setLastParagraphIndex] = useState(null);
-  const [selectedBlockIds, setSelectedBlockIds] = useState([]);
-  const [lastBlockGlobalIndex, setLastBlockGlobalIndex] = useState(null);
+  const [lastSelectedIndex, setLastSelectedIndex] = useState(null);
+  const [lastSelectedBlockIndex, setLastSelectedBlockIndex] = useState(null);
+  const [isModifierActive, setIsModifierActive] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [highlightedBlockId, setHighlightedBlockId] = useState(null);
+
+  const [selectionMode, setSelectionMode] = useState('paragraph'); // 'paragraph' or 'block'
 
   const popoverRef = useRef(null);
   const searchPopoverRef = useRef(null);
   const searchInputRef = useRef(null);
   const buttonRef = useRef(null);
+  const sermonViewRef = useRef(null);
+  const highlightTimeoutRef = useRef(null);
 
   // Load sermon structure if needed
   useEffect(() => {
@@ -95,6 +102,26 @@ const SermonView = () => {
     });
   }, [sermonData]);
 
+  const navigableSectionEntries = useMemo(() => {
+    const entries = [];
+    orderedSections.forEach((sec) => {
+      (sec.orderedParagraphIds || []).forEach(parId => {
+        const paragraph = sec.paragraphs?.[parId];
+        if (!paragraph) return;
+        const firstBlockId = paragraph.orderedBlockIds?.[0];
+        if (!firstBlockId) return;
+        const firstBlock = paragraph.blocks?.[firstBlockId];
+        if (firstBlock?.type === 'paragraphStart') {
+          const num = parseInt(firstBlock.text, 10);
+          if (Number.isInteger(num)) {
+            entries.push({ label: num, sectionId: sec.id, paragraphId: parId });
+          }
+        }
+      });
+    });
+    return entries;
+  }, [orderedSections]);
+
   const flatParagraphs = useMemo(() => {
     // modified: add globalIndex
     const list = [];
@@ -135,8 +162,15 @@ const SermonView = () => {
   }, [orderedSections]);
 
   const findSelectedIndex = () => {
-    if (!selectedParagraph) return -1;
-    return flatParagraphs.findIndex(p => p.sectionId === selectedParagraph.sectionId && p.paragraphId === selectedParagraph.paragraphId);
+    if (!selectedParagraphs || selectedParagraphs.length === 0) return -1;
+    const lastSelected = selectedParagraphs[selectedParagraphs.length - 1];
+    return flatParagraphs.findIndex(p => p.sectionId === lastSelected.sectionId && p.paragraphId === lastSelected.paragraphId);
+  };
+
+  const findSelectedBlockIndex = () => {
+    if (!selectedBlocks || selectedBlocks.length === 0) return -1;
+    const lastBlock = selectedBlocks[selectedBlocks.length - 1];
+    return flatBlocks.findIndex(b => b.blockId === lastBlock);
   };
 
   // Close popover when clicking outside
@@ -173,6 +207,15 @@ const SermonView = () => {
       //   event.preventDefault();
       //   handleNextParagraph();
       // }
+      else if (event.ctrlKey && event.key === 'c') {
+        if (selectionMode === 'block' && selectedBlocks.length > 0) {
+          event.preventDefault();
+          handleCopySelectedBlocks();
+        } else if (selectedParagraphs.length > 0) {
+          event.preventDefault();
+          handleCopySelectedParagraphs();
+        }
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -185,383 +228,89 @@ const SermonView = () => {
     }
   }, [showSectionPopover]);
 
-  // Listen for clear events from main process
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      const handleParagraphClear = () => {
-        clearSelectedParagraph();
-        clearSelectedVerses();
-      };
-      window.electronAPI.on('paragraph:cleared', handleParagraphClear);
-      return () => window.electronAPI.off('paragraph:cleared', handleParagraphClear);
-    }
-  }, [clearSelectedParagraph, clearSelectedVerses]);
+  const scrollToParagraph = (paragraphId, retries = 6) => {
+    const container = sermonViewRef.current;
+    if (!container) return;
 
-  // Scroll to selected paragraph
+    const el = container.querySelector(`[data-paragraph="${paragraphId}"]`);
+    if (!el) {
+      if (retries > 0) {
+        requestAnimationFrame(() => scrollToParagraph(paragraphId, retries - 1));
+      }
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const paragraphRect = el.getBoundingClientRect();
+    const elementOffset = paragraphRect.top - containerRect.top;
+    const centerOffset = (containerRect.height - paragraphRect.height) / 2;
+    const targetTop = container.scrollTop + elementOffset - centerOffset;
+
+    container.scrollTo({ top: targetTop, behavior: 'smooth' });
+  };
+
+  const scrollToBlock = (blockId, retries = 6) => {
+    const container = sermonViewRef.current;
+    if (!container) return;
+    const el = container.querySelector(`[data-block="${blockId}"]`);
+    if (!el) {
+      if (retries > 0) requestAnimationFrame(() => scrollToBlock(blockId, retries - 1));
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const blockRect = el.getBoundingClientRect();
+    const elementOffset = blockRect.top - containerRect.top;
+    const centerOffset = (containerRect.height - blockRect.height) / 2;
+    const targetTop = container.scrollTop + elementOffset - centerOffset;
+    container.scrollTo({ top: targetTop, behavior: 'smooth' });
+  };
+
+  // Track modifier keys for user-select styling
   useEffect(() => {
-    if (!selectedParagraph) return;
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+        setIsModifierActive(true);
+      }
+    };
+    const handleKeyUp = () => {
+      setIsModifierActive(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  // Scroll and highlight when explicitly set (from "go to" or navigation buttons, not from manual clicks)
+  useEffect(() => {
+    if (!highlightedParagraphId) return;
+    
     setTimeout(() => {
-      const el = document.querySelector(`[data-paragraph="${selectedParagraph.paragraphId}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        setHighlightedParagraphId(selectedParagraph.paragraphId);
-        setTimeout(() => setHighlightedParagraphId(null), 3000);
-      }
-    }, 100);
-  }, [selectedParagraph]);
+      scrollToParagraph(highlightedParagraphId);
+    }, 50);
+  }, [highlightedParagraphId]);
 
-  // FIX keep hook order stable
+  // Scroll and highlight for block navigation
   useEffect(() => {
-    if (!blockSelectionMode) {
-      setSelectedBlockId(null);
-      setSelectedBlockIds([]); // NEW clear multi block selection
-    }
-  }, [blockSelectionMode]);
+    if (!highlightedBlockId) return;
+    setTimeout(() => scrollToBlock(highlightedBlockId), 50);
+  }, [highlightedBlockId]);
 
-  if (!activeSermon) {
-    return (
-      <div className="flex-1 p-4 bg-neutral-900 flex items-center justify-center">
-        <p className="text-neutral-500">Select a sermon to view.</p>
-      </div>
-    );
-  }
-
-  if (isLoading || !sermonData) {
-    return (
-      <div className="flex-1 bg-neutral-900 text-white flex flex-col h-full">
-        {/* Show sermon header immediately while loading */}
-        <h1 className="text-3xl font-bold my-6 ml-6 text-center">
-          {activeSermon.title} <span className="text-neutral-400 text-xl font-normal ml-2">{activeSermon.date}</span>
-        </h1>
-        
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="text-neutral-400 mb-2">Loading content...</div>
-            <div className="animate-pulse">
-              <div className="h-4 bg-neutral-700 rounded w-48 mx-auto mb-2"></div>
-              <div className="h-4 bg-neutral-700 rounded w-32 mx-auto"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const handleSendSelection = (sectionId, paragraphId, specificBlockId = null) => {
-    if (!sermonData?.sections?.[sectionId]?.paragraphs?.[paragraphId]) return;
-    const section = sermonData.sections[sectionId];
-    const paragraph = section.paragraphs[paragraphId];
-
-    const blocks = (paragraph.orderedBlockIds || [])
-      .filter(bid => !specificBlockId || bid === specificBlockId) // NEW: allow single block
-      .map(bid => {
-        const b = paragraph.blocks[bid];
-        return {
-          uid: bid,
-          text: b.text,
-          type: b.type,
-          indented: !!b.indented,
-          italicSegments: b.italicSegments || []
-        };
-      });
-
-    if (typeof window !== 'undefined' && window.electronAPI) {
-      window.electronAPI.send('paragraph:selected', {
-        paragraphData: {
-          type: 'paragraph',
-          sermonUid: sermonData.uid,
-          title: sermonData.title,
-          date: sermonData.date,
-          sectionUid: sectionId,
-          sectionNumber: section.number,
-          paragraphUid: paragraphId,
-          paragraphOrder: paragraph.order,
-          blocks
-        },
-        displaySettings: displaySettings || {
-          enabled: true,
-          showTitle: true,
-          showDate: true,
-          showContent: true
-        }
-      });
-    }
-  };
-
-  const handleSendMultiParagraphSelection = (paragraphMetaList) => { // NEW
-    if (typeof window === 'undefined' || !window.electronAPI) return;
-    const paragraphsData = paragraphMetaList.map(meta => {
-      const section = sermonData.sections[meta.sectionId];
-      const paragraph = section.paragraphs[meta.paragraphId];
-      const blocks = (paragraph.orderedBlockIds || []).map(bid => {
-        const b = paragraph.blocks[bid];
-        return {
-          uid: bid,
-          text: b.text,
-          type: b.type,
-          indented: !!b.indented,
-          italicSegments: b.italicSegments || []
-        };
-      });
-      return {
-        sectionUid: meta.sectionId,
-        sectionNumber: section.number,
-        paragraphUid: meta.paragraphId,
-        paragraphOrder: paragraph.order,
-        blocks
-      };
-    });
-    window.electronAPI.send('paragraph:selected', {
-      paragraphData: {
-        type: 'paragraph-multi',
-        sermonUid: sermonData.uid,
-        title: sermonData.title,
-        date: sermonData.date,
-        paragraphs: paragraphsData
-      },
-      displaySettings: displaySettings || {
-        enabled: true,
-        showTitle: true,
-        showDate: true,
-        showContent: true
-      }
-    });
-  };
-
-  // REPLACE handleSendBlocksSelection to support multi-paragraph blocks
-  const handleSendBlocksSelection = (blockIds) => {
-    if (typeof window === 'undefined' || !window.electronAPI || blockIds.length === 0) return;
-
-    // Group selected blocks by paragraph
-    const selectedBlockMeta = flatBlocks.filter(b => blockIds.includes(b.blockId));
-    const grouped = {};
-    selectedBlockMeta.forEach(b => {
-      const key = `${b.sectionId}::${b.paragraphId}`;
-      if (!grouped[key]) grouped[key] = { sectionId: b.sectionId, paragraphId: b.paragraphId, blockIds: [] };
-      grouped[key].blockIds.push(b.blockId);
-    });
-
-    const paragraphsData = Object.values(grouped).map(meta => {
-      const section = sermonData.sections[meta.sectionId];
-      const paragraph = section.paragraphs[meta.paragraphId];
-      const blocks = meta.blockIds.map(bid => {
-        const b = paragraph.blocks[bid];
-        return {
-          uid: bid,
-          text: b.text,
-          type: b.type,
-          indented: !!b.indented,
-          italicSegments: b.italicSegments || []
-        };
-      });
-      return {
-        sectionUid: meta.sectionId,
-        sectionNumber: section.number,
-        paragraphUid: meta.paragraphId,
-        paragraphOrder: paragraph.order,
-        blocks
-      };
-    });
-
-    window.electronAPI.send('paragraph:selected', {
-      paragraphData: {
-        type: blockIds.length === 1 ? 'paragraph-block-single' : 'block-multi',
-        sermonUid: sermonData.uid,
-        title: sermonData.title,
-        date: sermonData.date,
-        paragraphs: paragraphsData
-      },
-      displaySettings: displaySettings || {
-        enabled: true,
-        showTitle: true,
-        showDate: true,
-        showContent: true
-      }
-    });
-  };
-
-  const handleParagraphClick = (sectionId, paragraphId) => {
-    // Clear selected block when changing paragraph
-    setSelectedBlockId(null);
-    setSelectedBlockIds([]); // NEW clear blocks when focusing single paragraph
-    setSelectedParagraph({ sermonUid: sermonData.uid, sectionId, paragraphId });
-    handleSendSelection(sectionId, paragraphId);
-  };
-
-  const handleParagraphInteraction = (item, event) => { // NEW ctrl/shift logic
-    const pid = item.paragraphId;
-    const idx = flatParagraphs.findIndex(p => p.paragraphId === pid && p.sectionId === item.sectionId);
-    const { ctrlKey, metaKey, shiftKey } = event;
-    const ctrl = ctrlKey || metaKey;
-
-    if (shiftKey && selectedParagraphIds.length > 0) {
-      const anchor = lastParagraphIndex != null ? lastParagraphIndex : idx;
-      const start = Math.min(anchor, idx);
-      const end = Math.max(anchor, idx);
-      const range = flatParagraphs.slice(start, end + 1).map(p => p.paragraphId);
-      const merged = Array.from(new Set([...selectedParagraphIds, ...range]));
-      setSelectedParagraphIds(merged);
-      setSelectedParagraph({ sermonUid: sermonData.uid, sectionId: item.sectionId, paragraphId: pid });
-      handleSendMultiParagraphSelection(
-        flatParagraphs
-          .filter(p => merged.includes(p.paragraphId))
-          .map(p => ({ sectionId: p.sectionId, paragraphId: p.paragraphId }))
-      );
-    } else if (ctrl) {
-      let updated;
-      if (selectedParagraphIds.includes(pid)) {
-        updated = selectedParagraphIds.filter(id => id !== pid);
-      } else {
-        updated = [...selectedParagraphIds, pid];
-      }
-      setSelectedParagraphIds(updated);
-      setLastParagraphIndex(idx);
-      if (updated.length === 0) {
-        clearSelectedParagraph();
-      } else {
-        setSelectedParagraph({ sermonUid: sermonData.uid, sectionId: item.sectionId, paragraphId: pid });
-        if (updated.length === 1) {
-          handleSendSelection(item.sectionId, pid);
-        } else {
-          handleSendMultiParagraphSelection(
-            flatParagraphs
-              .filter(p => updated.includes(p.paragraphId))
-              .map(p => ({ sectionId: p.sectionId, paragraphId: p.paragraphId }))
-          );
-        }
-      }
+  // Clear opposite selection type when switching modes
+  useEffect(() => {
+    if (selectionMode === 'paragraph') {
+      setSelectedBlocks([]);
+      setLastSelectedBlockIndex(null);
     } else {
-      // plain click
-      if (selectedParagraphIds.length === 1 && selectedParagraphIds[0] === pid) {
-        // deselect
-        setSelectedParagraphIds([]);
-        clearSelectedParagraph();
-        setSelectedBlockIds([]);
-        setSelectedBlockId(null);
-      } else {
-        setSelectedParagraphIds([pid]);
-        setLastParagraphIndex(idx);
-        handleParagraphClick(item.sectionId, pid);
-      }
+      setSelectedParagraphs([]);
+      setLastSelectedIndex(null);
     }
-  };
+  }, [selectionMode]);
 
-  // REPLACE handleBlockClick to allow shift across paragraphs
-  const handleBlockClick = (paragraphMeta, blockId, ctrlKey, shiftKey) => {
-    if (!blockSelectionMode) return;
-
-    const currentGlobalIndex = flatBlocks.findIndex(b => b.blockId === blockId);
-    if (currentGlobalIndex === -1) return;
-
-    if (shiftKey) {
-      // Determine anchor: lastBlockGlobalIndex or last selected block in global order
-      let anchor = lastBlockGlobalIndex;
-      if (anchor == null) {
-        // fallback: last selected block's global index
-        for (let i = selectedBlockIds.length - 1; i >= 0; i--) {
-          const candidateIdx = flatBlocks.findIndex(b => b.blockId === selectedBlockIds[i]);
-          if (candidateIdx !== -1) {
-            anchor = candidateIdx;
-            break;
-          }
-        }
-        if (anchor == null) anchor = currentGlobalIndex;
-      }
-      const start = Math.min(anchor, currentGlobalIndex);
-      const end = Math.max(anchor, currentGlobalIndex);
-      const rangeIds = flatBlocks.slice(start, end + 1).map(b => b.blockId);
-      const merged = Array.from(new Set([...selectedBlockIds, ...rangeIds]));
-      setSelectedBlockIds(merged);
-      setLastBlockGlobalIndex(currentGlobalIndex);
-      handleSendBlocksSelection(merged);
-      return;
-    }
-
-    if (ctrlKey) {
-      let updated;
-      if (selectedBlockIds.includes(blockId)) {
-        updated = selectedBlockIds.filter(id => id !== blockId);
-      } else {
-        updated = [...selectedBlockIds, blockId];
-      }
-      setSelectedBlockIds(updated);
-      setLastBlockGlobalIndex(currentGlobalIndex);
-      if (updated.length === 0) return;
-      if (updated.length === 1) {
-        // single
-        handleSendSelection(paragraphMeta.sectionId, paragraphMeta.paragraphId, updated[0]);
-      } else {
-        handleSendBlocksSelection(updated);
-      }
-      return;
-    }
-
-    // Plain click
-    if (selectedBlockIds.length === 1 && selectedBlockIds[0] === blockId) {
-      setSelectedBlockIds([]);
-      setSelectedBlockId(null);
-      return;
-    }
-    setSelectedBlockIds([blockId]);
-    setSelectedBlockId(blockId);
-    setLastBlockGlobalIndex(currentGlobalIndex);
-    handleSendSelection(paragraphMeta.sectionId, paragraphMeta.paragraphId, blockId);
-  };
-
-  const isParagraphSelected = (sectionId, paragraphId) => {
-    return selectedParagraphIds.includes(paragraphId); // UPDATED
-  };
-
-  const handlePreviousParagraph = () => {
-    const idx = findSelectedIndex();
-    const prevIdx = idx > 0 ? idx - 1 : -1;
-    if (prevIdx >= 0) {
-      const p = flatParagraphs[prevIdx];
-      handleParagraphClick(p.sectionId, p.paragraphId);
-    }
-  };
-
-  const handleNextParagraph = () => {
-    const idx = findSelectedIndex();
-    const nextIdx = idx >= 0 && idx < flatParagraphs.length - 1 ? idx + 1 : (idx === -1 && flatParagraphs.length > 0 ? 0 : -1);
-    if (nextIdx >= 0) {
-      const p = flatParagraphs[nextIdx];
-      handleParagraphClick(p.sectionId, p.paragraphId);
-    }
-  };
-
-  const handleSearchNavigation = () => {
-    const trimmed = searchInput.trim();
-    if (!trimmed) return;
-    const num = parseInt(trimmed, 10);
-    if (Number.isNaN(num) || num < 1 || num > flatParagraphs.length) return;
-    const p = flatParagraphs[num - 1];
-    handleParagraphClick(p.sectionId, p.paragraphId);
-    setShowSectionPopover(false);
-    setSearchInput('');
-    setTimeout(() => {
-      const el = document.querySelector(`[data-paragraph="${p.paragraphId}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        setHighlightedParagraphId(p.paragraphId);
-        setTimeout(() => setHighlightedParagraphId(null), 3000);
-      }
-    }, 100);
-  };
-
-  const handleSearchInputChange = (e) => {
-    const value = e.target.value;
-    if (/^\d*$/.test(value)) setSearchInput(value);
-  };
-
-  const isSearchInputValid = () => {
-    const trimmed = searchInput.trim();
-    if (!trimmed) return false;
-    const num = parseInt(trimmed, 10);
-    return Number.isInteger(num) && num >= 1 && num <= flatParagraphs.length;
-  };
-
-  const renderWithItalics = (text, segments = []) => {
+  // Memoize renderWithItalics to prevent recreation on every render
+  const renderWithItalics = useCallback((text, segments = []) => {
     if (!segments || segments.length === 0) return text;
     const sorted = [...segments].sort((a, b) => a.index - b.index);
     const nodes = [];
@@ -577,50 +326,430 @@ const SermonView = () => {
     });
     if (cursor < text.length) nodes.push(<span key="t-end">{text.slice(cursor)}</span>);
     return nodes;
+  }, []);
+
+  // Memoize handleParagraphClick to prevent recreation
+  const handleParagraphClick = useCallback((item, e) => {
+    const isCtrl = e.ctrlKey || e.metaKey;
+    const isShift = e.shiftKey;
+    const currentIndex = item.globalIndex;
+
+    // check if clicked paragraph is already selected and selecting a single paragraph (no modifiers)
+    const isSingleSelected = selectedParagraphs.length === 1 &&
+      selectedParagraphs[0].sectionId === item.sectionId &&
+      selectedParagraphs[0].paragraphId === item.paragraphId;
+    
+    if (isSingleSelected && !isCtrl && !isShift) {
+      // Deselect if clicking the already selected paragraph without modifiers
+      setSelectedParagraphs([]);
+      setLastSelectedIndex(null);
+      return;
+    }
+    
+    if (isShift && lastSelectedIndex !== null) {
+      // Range selection
+      const start = Math.min(lastSelectedIndex, currentIndex);
+      const end = Math.max(lastSelectedIndex, currentIndex);
+      const range = flatParagraphs
+        .filter(p => p.globalIndex >= start && p.globalIndex <= end)
+        .map(p => ({ sectionId: p.sectionId, paragraphId: p.paragraphId }));
+      setSelectedParagraphs(range);
+    } else if (isCtrl) {
+      // Toggle selection
+      const isAlreadySelected = selectedParagraphs.some(
+        p => p.sectionId === item.sectionId && p.paragraphId === item.paragraphId
+      );
+      if (isAlreadySelected) {
+        setSelectedParagraphs(
+          selectedParagraphs.filter(
+            p => !(p.sectionId === item.sectionId && p.paragraphId === item.paragraphId)
+          )
+        );
+      } else {
+        setSelectedParagraphs([...selectedParagraphs, { sectionId: item.sectionId, paragraphId: item.paragraphId }]);
+      }
+      setLastSelectedIndex(currentIndex);
+    } else {
+      // Normal click - single selection
+      setSelectedParagraphs([{ sectionId: item.sectionId, paragraphId: item.paragraphId }]);
+      setLastSelectedIndex(currentIndex);
+    }
+  }, [selectedParagraphs, lastSelectedIndex, flatParagraphs, setSelectedParagraphs, setLastSelectedIndex]);
+
+  // Block click handler for block selection mode
+  const handleBlockClick = useCallback((blockId, ctrlKey, shiftKey) => {
+    const currentGlobalIndex = flatBlocks.findIndex(b => b.blockId === blockId);
+    if (currentGlobalIndex === -1) return;
+
+    if (shiftKey && lastSelectedBlockIndex !== null) {
+      const start = Math.min(lastSelectedBlockIndex, currentGlobalIndex);
+      const end = Math.max(lastSelectedBlockIndex, currentGlobalIndex);
+      const rangeIds = flatBlocks.slice(start, end + 1).map(b => b.blockId);
+      const merged = Array.from(new Set([...selectedBlocks, ...rangeIds]));
+      setSelectedBlocks(merged);
+      setLastSelectedBlockIndex(currentGlobalIndex);
+      return;
+    }
+
+    if (ctrlKey) {
+      if (selectedBlocks.includes(blockId)) {
+        setSelectedBlocks(selectedBlocks.filter(id => id !== blockId));
+      } else {
+        setSelectedBlocks([...selectedBlocks, blockId]);
+      }
+      setLastSelectedBlockIndex(currentGlobalIndex);
+      return;
+    }
+
+    // Plain click - toggle if already the only selection
+    if (selectedBlocks.length === 1 && selectedBlocks[0] === blockId) {
+      setSelectedBlocks([]);
+      setLastSelectedBlockIndex(null);
+      return;
+    }
+    setSelectedBlocks([blockId]);
+    setLastSelectedBlockIndex(currentGlobalIndex);
+  }, [flatBlocks, lastSelectedBlockIndex, selectedBlocks, setSelectedBlocks]);
+
+  if (!activeSermon) {
+    return (
+      <div className="flex-1 p-4 bg-neutral-900 flex items-center justify-center">
+        <p className="text-neutral-500">Select a sermon to view.</p>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+  // if (true) {
+    return (
+      <div className="flex-1 bg-neutral-900 text-white flex flex-col h-full overflow-y-scroll dark-scroll">
+        {/* Show sermon header immediately while loading */}
+        <h1 className="text-4xl font-bold my-14 ml-6 text-center">
+          {sermonData?.title} <span className="text-neutral-400 text-xl font-normal ml-2">{sermonData?.date}</span>
+        </h1>
+        
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-neutral-400 mb-2">Loading content...</div>
+            <div className="animate-pulse">
+              <div className="h-4 bg-neutral-700 rounded w-48 mx-auto mb-2"></div>
+              <div className="h-4 bg-neutral-700 rounded w-32 mx-auto"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const navigateToParagraph = (p) => {
+    setSelectedParagraphs([{ sectionId: p.sectionId, paragraphId: p.paragraphId }]);
+    setLastSelectedIndex(p.globalIndex);
+    setShowSectionPopover(false);
+    setSearchInput('');
+    // Clear any pending highlight timeout before starting a new one
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = null;
+    }
+    setHighlightedParagraphId(null);
+    // Small delay lets React flush the null before setting the new id,
+    // ensuring the transition triggers fresh each time
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollToParagraph(p.paragraphId);
+        setHighlightedParagraphId(p.paragraphId);
+        highlightTimeoutRef.current = setTimeout(() => {
+          setHighlightedParagraphId(null);
+          highlightTimeoutRef.current = null;
+        }, 1500);
+      });
+    });
+  };
+
+  const handlePreviousParagraph = () => {
+    const idx = findSelectedIndex();
+    const prevIdx = idx > 0 ? idx - 1 : -1;
+    if (prevIdx >= 0) {
+      navigateToParagraph(flatParagraphs[prevIdx]);
+    }
+  };
+
+  const handleNextParagraph = () => {
+    const idx = findSelectedIndex();
+    const nextIdx = idx >= 0 && idx < flatParagraphs.length - 1 ? idx + 1 : (idx === -1 && flatParagraphs.length > 0 ? 0 : -1);
+    if (nextIdx >= 0) {
+      navigateToParagraph(flatParagraphs[nextIdx]);
+    }
+  };
+
+  // Block navigation functions
+  const navigateToBlock = (block) => {
+    setSelectedBlocks([block.blockId]);
+    setLastSelectedBlockIndex(block.globalIndex);
+    setShowSectionPopover(false);
+    setSearchInput('');
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+      highlightTimeoutRef.current = null;
+    }
+    setHighlightedBlockId(null);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollToBlock(block.blockId);
+        setHighlightedBlockId(block.blockId);
+        highlightTimeoutRef.current = setTimeout(() => {
+          setHighlightedBlockId(null);
+          highlightTimeoutRef.current = null;
+        }, 1500);
+      });
+    });
+  };
+
+  const handlePreviousBlock = () => {
+    const idx = findSelectedBlockIndex();
+    const prevIdx = idx > 0 ? idx - 1 : -1;
+    if (prevIdx >= 0) navigateToBlock(flatBlocks[prevIdx]);
+  };
+
+  const handleNextBlock = () => {
+    const idx = findSelectedBlockIndex();
+    const nextIdx = idx >= 0 && idx < flatBlocks.length - 1 ? idx + 1 : (idx === -1 && flatBlocks.length > 0 ? 0 : -1);
+    if (nextIdx >= 0) navigateToBlock(flatBlocks[nextIdx]);
+  };
+
+  const navigateToSection = (sectionId, paragraphId) => {
+    const section = sermonData?.sections?.[sectionId];
+    if (!section?.orderedParagraphIds?.length) return;
+    const targetParagraphId = paragraphId || section.orderedParagraphIds[0];
+    if (selectionMode === 'block') {
+      const paragraph = section.paragraphs[targetParagraphId];
+      if (!paragraph?.orderedBlockIds?.length) return;
+      const firstBlockId = paragraph.orderedBlockIds[0];
+      const block = flatBlocks.find(b => b.blockId === firstBlockId);
+      if (!block) return;
+      navigateToBlock(block);
+    } else {
+      const p = flatParagraphs.find(fp => fp.sectionId === sectionId && fp.paragraphId === targetParagraphId);
+      if (!p) return;
+      navigateToParagraph(p);
+    }
+  };
+
+  const handleSearchNavigation = () => {
+    const trimmed = searchInput.trim();
+    if (!trimmed) return;
+    const num = parseInt(trimmed, 10);
+    if (Number.isNaN(num) || num < 1) return;
+    const entry = navigableSectionEntries.find(e => e.label === num);
+    if (!entry) return;
+    navigateToSection(entry.sectionId, entry.paragraphId);
+  };
+
+  const handleSearchInputChange = (e) => {
+    const value = e.target.value;
+    if (/^\d*$/.test(value)) setSearchInput(value);
+  };
+
+  const isSearchInputValid = () => {
+    const trimmed = searchInput.trim();
+    if (!trimmed) return false;
+    const num = parseInt(trimmed, 10);
+    if (!Number.isInteger(num) || num < 1) return false;
+    return navigableSectionEntries.some(entry => entry.label === num);
+  };
+
+  // Handlers moved above for proper hook ordering
+
+  const extractTextFromParagraph = (sectionId, paragraphId) => {
+    const section = sermonData?.sections?.[sectionId];
+    const paragraph = section?.paragraphs?.[paragraphId];
+    if (!paragraph) return '';
+    
+    const textParts = [];
+    (paragraph.orderedBlockIds || []).forEach(bid => {
+      const block = paragraph.blocks[bid];
+      if (block?.text) {
+        textParts.push(block.text);
+      }
+    });
+    return textParts.join(' ');
+  };
+
+  const handleCopySelectedParagraphs = async () => {
+    if (selectedParagraphs.length === 0) return;
+
+    // sort selected paragraphs by their order in the sermon
+    const sortedParagraphs = selectedParagraphs.slice().sort((a, b) => {
+      const aIndex = flatParagraphs.findIndex(p => p.sectionId === a.sectionId && p.paragraphId === a.paragraphId);
+      const bIndex = flatParagraphs.findIndex(p => p.sectionId === b.sectionId && p.paragraphId === b.paragraphId);
+      return aIndex - bIndex;
+    });
+    
+    const paragraphTexts = sortedParagraphs.map(sel => 
+      extractTextFromParagraph(sel.sectionId, sel.paragraphId)
+    ).filter(Boolean);
+    
+    const fullText = [
+      ...paragraphTexts,
+      '',
+      sermonData?.title || '',
+      'Sermon by William Marrion Branham'
+    ].join('\n');
+    
+    try {
+      await navigator.clipboard.writeText(fullText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  const handleCopySelectedBlocks = async () => {
+    if (selectedBlocks.length === 0) return;
+    const sortedBlocks = selectedBlocks.slice().sort((a, b) => {
+      const aIdx = flatBlocks.findIndex(fb => fb.blockId === a);
+      const bIdx = flatBlocks.findIndex(fb => fb.blockId === b);
+      return aIdx - bIdx;
+    });
+    // Group blocks by paragraph for natural reading
+    const paragraphGroups = [];
+    let currentGroup = { paragraphId: null, texts: [] };
+    sortedBlocks.forEach(bid => {
+      const blockInfo = flatBlocks.find(fb => fb.blockId === bid);
+      if (!blockInfo) return;
+      const section = sermonData?.sections?.[blockInfo.sectionId];
+      const paragraph = section?.paragraphs?.[blockInfo.paragraphId];
+      const block = paragraph?.blocks?.[bid];
+      if (!block?.text) return;
+      if (blockInfo.paragraphId !== currentGroup.paragraphId) {
+        if (currentGroup.texts.length > 0) paragraphGroups.push(currentGroup.texts.join(' '));
+        currentGroup = { paragraphId: blockInfo.paragraphId, texts: [block.text] };
+      } else {
+        currentGroup.texts.push(block.text);
+      }
+    });
+    if (currentGroup.texts.length > 0) paragraphGroups.push(currentGroup.texts.join(' '));
+    const fullText = [
+      ...paragraphGroups,
+      '',
+      sermonData?.title || '',
+      'Sermon by William Marrion Branham'
+    ].join('\n');
+    try {
+      await navigator.clipboard.writeText(fullText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
   };
 
   return (
-    <div className="flex-1 bg-neutral-900 text-white flex flex-col overflow-y-scroll h-full dark-scroll relative">
-      <h1 className="text-3xl font-bold my-6 ml-6 text-center">
+    <div
+      className="flex-1 bg-neutral-900 text-white flex flex-col overflow-y-scroll h-full dark-scroll relative"
+      ref={sermonViewRef}
+    >
+      {/* <h1 className="text-3xl font-bold my-6 ml-6 text-center">
         {sermonData.title} <span className="text-neutral-400 text-xl font-normal ml-2">{sermonData.date}</span>
+      </h1> */}
+
+      <h1 className="text-4xl font-bold my-14 ml-6 text-center">
+        {sermonData?.title} <span className="text-neutral-400 text-xl font-normal ml-2">{sermonData?.date}</span>
       </h1>
 
       {/* Replaced sectioned display with flat paragraphs */}
-      <div className="flex flex-col px-4">
+      {/* <div className="flex flex-col px-4" style={isModifierActive ? { userSelect: 'none' } : {}}> */}
+      <div className="flex flex-col px-4" style={{ userSelect: 'none' }}>
         {flatParagraphs.map(item => {
-          // ...existing paragraph resolution...
           const sec = sermonData.sections[item.sectionId];
           const paragraph = sec?.paragraphs?.[item.paragraphId];
           if (!paragraph) return null;
-          const isSelected = isParagraphSelected(item.sectionId, item.paragraphId);
-          const isHighlighted = highlightedParagraphId === item.paragraphId;
 
+          if (selectionMode === 'block') {
             return (
-              <ParagraphView
+              <BlockView
                 key={item.paragraphId}
                 paragraph={paragraph}
                 paragraphId={item.paragraphId}
-                paragraphNumber={item.globalIndex}
-                isSelected={isSelected}
-                isHighlighted={isHighlighted}
-                onClick={(e) => handleParagraphInteraction(item, e)} // UPDATED pass event
+                sectionId={item.sectionId}
                 renderWithItalics={renderWithItalics}
-                blockSelectionMode={blockSelectionMode}
-                selectedBlockIds={selectedBlockIds}                 // UPDATED multi blocks
-                onBlockClick={(blockId, ctrl, shift) => handleBlockClick(item, blockId, ctrl, shift)}
+                selectedBlockIds={selectedBlocks}
+                highlightedBlockId={highlightedBlockId}
+                onBlockClick={handleBlockClick}
               />
             );
+          }
+
+          const isSelected = selectedParagraphs.some(
+            p => p.sectionId === item.sectionId && p.paragraphId === item.paragraphId
+          );
+          const isHighlighted = highlightedParagraphId === item.paragraphId;
+
+          return (
+            <ParagraphView
+              key={item.paragraphId}
+              paragraph={paragraph}
+              paragraphId={item.paragraphId}
+              paragraphNumber={item.globalIndex}
+              sectionId={item.sectionId}
+              itemData={item}
+              isSelected={isSelected}
+              isHighlighted={isHighlighted}
+              onParagraphClick={handleParagraphClick}
+              renderWithItalics={renderWithItalics}
+              blockSelectionMode={false}
+              selectedBlockIds={[]}
+              onBlockClick={handleBlockClick}
+            />
+          );
         })}
       </div>
 
       <div className="h-full"></div>
 
+      {/* Floating toolbar for selected paragraphs */}
+      <div className="fixed bottom-18 right-8 z-20 bg-neutral-900 rounded-md border border-neutral-800 shadow-lg p-2 flex items-center gap-2 transition-all duration-200 hover:bg-neutral-750">
+        {/* <span className="text-xs text-neutral-400 px-2">
+          {selectedParagraphs.length} paragraph{selectedParagraphs.length > 1 ? 's' : ''} selected
+        </span> */}
+        {(selectionMode === 'block' ? selectedBlocks.length > 0 : selectedParagraphs.length > 0) && (
+          <button
+            onClick={selectionMode === 'block' ? handleCopySelectedBlocks : handleCopySelectedParagraphs}
+            className="p-4 rounded bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 flex items-center gap-2 transition-colors"
+            title={selectionMode === 'block' ? 'Copy selected blocks' : 'Copy selected paragraphs'}
+          >
+            {copied ? (
+              <>
+                <FiCheck size={16} className="text-white" />
+                {/* <span className="text-green-400">Copied!</span> */}
+              </>
+            ) : (
+              <>
+                <FiCopy size={16} />
+                {/* <span>Copy</span> */}
+              </>
+            )}
+            {/* <FiCopy size={16} /> */}
+          </button>
+        )}
+        <button
+          onClick={() => selectionMode === 'paragraph' ? setSelectionMode('block') : setSelectionMode('paragraph')}
+          className="p-4 rounded bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 flex items-center gap-2 transition-colors"
+          title={selectionMode === 'paragraph' ? 'Switch to block selection' : 'Switch to paragraph selection'}
+        >
+          {selectionMode === 'paragraph' ? <PiSelectionAll size={16} /> : <LuTextSelect size={16} />}
+        </button>
+      </div>
+
       {/* Controls */}
       <div className="flex-grow flex items-center justify-center gap-3 sticky bottom-8 z-10 mt-12 w-full">
         <div className="relative w-fit flex items-center justify-center gap-3 p-2 bg-neutral-900 rounded-md border border-neutral-800 shadow-lg">
           <button
-            onClick={handlePreviousParagraph}
-            disabled={flatParagraphs.length === 0 || findSelectedIndex() <= 0}
+            onClick={selectionMode === 'block' ? handlePreviousBlock : handlePreviousParagraph}
+            disabled={selectionMode === 'block'
+              ? flatBlocks.length === 0 || findSelectedBlockIndex() <= 0
+              : flatParagraphs.length === 0 || findSelectedIndex() <= 0}
             className="p-3 px-5 rounded bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 disabled:opacity-50"
           >
             <FiChevronLeft size={20} />
@@ -632,28 +761,20 @@ const SermonView = () => {
             className="px-4 rounded bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 flex items-center gap-2 transition-colors"
           >
             <p className="text-sm font-semibold my-2">
-              {sermonData.title}
+              {sermonData?.title}
             </p>
             {showSectionPopover ? <FaCaretDown /> : <FaCaretUp />}
           </button>
 
-            <button
-              onClick={handleNextParagraph}
-              disabled={flatParagraphs.length === 0 || findSelectedIndex() === flatParagraphs.length - 1}
-              className="p-3 px-5 rounded bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <FiChevronRight size={20} />
-            </button>
-
-            {/* View toggle */}
-            <div className="ml-2 flex items-center gap-2">
-              <button
-                onClick={() => setBlockSelectionMode(m => !m)}
-                className={`px-3 py-2 rounded text-sm ${blockSelectionMode ? 'bg-blue-500 text-white' : 'bg-neutral-800 hover:bg-neutral-700'}`}
-              >
-                {blockSelectionMode ? 'Block Select On' : 'Block Select'}
-              </button>
-            </div>
+          <button
+            onClick={selectionMode === 'block' ? handleNextBlock : handleNextParagraph}
+            disabled={selectionMode === 'block'
+              ? flatBlocks.length === 0 || findSelectedBlockIndex() === flatBlocks.length - 1
+              : flatParagraphs.length === 0 || findSelectedIndex() === flatParagraphs.length - 1}
+            className="p-3 px-5 rounded bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 disabled:opacity-50"
+          >
+            <FiChevronRight size={20} />
+          </button>
         </div>
 
         {/* Paragraph number popover */}
@@ -663,21 +784,17 @@ const SermonView = () => {
             ${showSectionPopover ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0 pointer-events-none'}
           `}
         >
-          {flatParagraphs.map(p => {
-            const selected = selectedParagraph && selectedParagraph.sectionId === p.sectionId && selectedParagraph.paragraphId === p.paragraphId;
+          {navigableSectionEntries.map(entry => {
+            const selected = selectedParagraphs.some(p => p.sectionId === entry.sectionId && p.paragraphId === entry.paragraphId);
             return (
               <button
-                key={p.paragraphId}
-                onClick={() => {
-                  handleParagraphClick(p.sectionId, p.paragraphId);
-                  setShowSectionPopover(false);
-                  setSearchInput('');
-                }}
+                key={`${entry.sectionId}-${entry.paragraphId}`}
+                onClick={() => navigateToSection(entry.sectionId, entry.paragraphId)}
                 className={`flex-1 min-w-[4rem] min-h-10 text-sm text-center rounded hover:bg-neutral-700/60 ${
                   selected ? 'bg-white text-black font-bold hover:bg-white' : 'bg-neutral-800/40'
                 }`}
               >
-                {p.globalIndex}
+                {entry.label}
               </button>
             );
           })}
@@ -698,7 +815,7 @@ const SermonView = () => {
                 value={searchInput}
                 onChange={handleSearchInputChange}
                 onKeyPress={(e)=> e.key==='Enter' && handleSearchNavigation()}
-                placeholder="Go to paragraph"
+                placeholder="Go to section"
                 className="w-full rounded focus:outline-none p-2 hover:bg-neutral-800/60 bg-neutral-800 focus:bg-neutral-800 text-sm !text-neutral-500 focus:!text-white hover:!text-neutral-300 transition-colors"
               />
               <button
@@ -712,6 +829,17 @@ const SermonView = () => {
           </div>
         </div>
       </div>
+
+      {/* <div className="flex-grow flex items-center justify-start gap-3 sticky bottom-8 z-10 mt-12 w-full">
+        <div className="relative w-fit flex items-center justify-center gap-3 p-2 bg-neutral-900 rounded-md border border-neutral-800 shadow-lg">
+          <button
+            onClick={() => selectionMode === 'paragraph' ? setSelectionMode('block') : setSelectionMode('paragraph')}
+            className="p-3 px-5 rounded bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 disabled:opacity-50"
+          >
+            {selectionMode === 'paragraph' ? 'Block Select' : 'Paragraph Select'}
+          </button>
+        </div>
+      </div> */}
     </div>
   );
 };

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 
 import useSermonStore from '@/stores/sermonStore';
@@ -25,9 +25,10 @@ export default function BibleList() {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [autoExpandMode, setAutoExpandMode] = useState(false);
   const [lastExpandedIndex, setLastExpandedIndex] = useState(-1);
-  const [selectedBookIndex, setSelectedBookIndex] = useState(0); // Add separate index for smart search
+  const [selectedMatchIndex, setSelectedMatchIndex] = useState(0);
   const searchInputRef = useRef(null);
   const selectedBookRef = useRef(null);
+  const listRef = useRef(null);
 
   const [searchMode, setSearchMode] = useState('BOOK');
 
@@ -48,7 +49,15 @@ export default function BibleList() {
 
   // Smart book search logic (updated to match SearchModal)
   const smartBookSearch = useMemo(() => {
-    if (!searchTerm.trim()) return { books: [], suggestion: '', chapter: null, verse: null, destinationPreview: '' };
+    if (!searchTerm.trim()) {
+      return {
+        books: [],
+        suggestion: '',
+        chapter: null,
+        verse: null,
+        destinationPreview: '',
+      };
+    }
 
     const input = searchTerm.trim();
 
@@ -105,12 +114,14 @@ export default function BibleList() {
     let destinationPreview = '';
 
     if (matchingBooks.length > 0) {
-      const firstBook = matchingBooks[selectedBookIndex] || matchingBooks[0];
+      const selectedBook = matchingBooks[selectedMatchIndex] || matchingBooks[0];
 
       // For suggestion, complete the book name if it's partial
-      if (bookPart.toLowerCase() !== firstBook.name.toLowerCase() &&
-        bookPart.toLowerCase() !== firstBook.short_name.toLowerCase()) {
-        suggestion = firstBook.name;
+      if (
+        bookPart.toLowerCase() !== selectedBook.name.toLowerCase() &&
+        bookPart.toLowerCase() !== selectedBook.short_name.toLowerCase()
+      ) {
+        suggestion = selectedBook.name;
         if (chapter) {
           suggestion += ` ${chapter}`;
           if (verse) {
@@ -120,7 +131,7 @@ export default function BibleList() {
       }
 
       // Always show destination preview
-      destinationPreview = firstBook.name;
+      destinationPreview = selectedBook.name;
       if (chapter) {
         destinationPreview += ` ${chapter}`;
         if (verse) {
@@ -132,7 +143,9 @@ export default function BibleList() {
     }
 
     return { books: matchingBooks, suggestion, chapter, verse, destinationPreview };
-  }, [searchTerm, books, selectedBookIndex]);
+  }, [searchTerm, books, selectedMatchIndex]);
+
+  const hasSmartMatches = smartBookSearch.books.length > 0;
 
   const inlineSuggestion = useMemo(() => {
     if (!searchTerm) return '';
@@ -148,9 +161,7 @@ export default function BibleList() {
 
   const filteredBooks = useMemo(() => {
     if (!books || books.length === 0) return [];
-    if (!searchTerm) return books;
-
-    // Use smart search results if available
+    if (!searchTerm.trim()) return books;
     if (smartBookSearch.books.length > 0) {
       return smartBookSearch.books;
     }
@@ -167,7 +178,7 @@ export default function BibleList() {
     setLoading(true);
 
     try {
-      let targetBook = matchingBooks[selectedBookIndex] || matchingBooks[0];
+      let targetBook = matchingBooks[selectedMatchIndex] || matchingBooks[0];
       let targetChapter = chapter || 1;
 
       // If chapter is specified, find a book that has that chapter
@@ -194,11 +205,14 @@ export default function BibleList() {
       }
 
       const bookData = await bibleSearch.getBook(targetBook.id);
-      // setActiveBookWithVerse(targetBook, bookData, targetChapter, verse);
+      setActiveBook(targetBook);
+      setActiveBookData(bookData);
+      setActiveChapter(targetChapter);
 
       // Clear search
       setSearchTerm('');
       setSelectedIndex(-1);
+      setSelectedMatchIndex(0);
     } catch (error) {
       console.error('Error navigating to book:', error);
     } finally {
@@ -206,41 +220,73 @@ export default function BibleList() {
     }
   };
 
-  const scrollToSelectedBook = () => {
-    if (selectedBookRef.current) {
-      selectedBookRef.current.scrollIntoView({
-        // behavior: 'smooth',
-        block: 'center',
-        inline: 'nearest'
-      });
+  const scrollToSelectedBook = useCallback(() => {
+    const container = listRef.current;
+    const selected = selectedBookRef.current;
+    if (!container || !selected) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const selectedRect = selected.getBoundingClientRect();
+    const offsetTop = selectedRect.top - containerRect.top + container.scrollTop;
+    const offsetBottom = offsetTop + selectedRect.height;
+    const viewTop = container.scrollTop;
+    const viewBottom = viewTop + container.clientHeight;
+
+    if (offsetTop < viewTop) {
+      container.scrollTop = offsetTop;
+      return;
     }
-  };
+
+    if (offsetBottom > viewBottom) {
+      container.scrollTop = Math.max(0, offsetBottom - container.clientHeight);
+    }
+  }, []);
+
+  const scrollToIndex = useCallback((index) => {
+    if (index < 0) return;
+    if (selectedBookRef.current) {
+      scrollToSelectedBook();
+    }
+  }, [scrollToSelectedBook]);
+
+  useEffect(() => {
+    const activeIndex = hasSmartMatches ? selectedMatchIndex : selectedIndex;
+    if (activeIndex < 0) return;
+
+    const frame = requestAnimationFrame(() => {
+      scrollToSelectedBook();
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [hasSmartMatches, selectedIndex, selectedMatchIndex, scrollToSelectedBook]);
 
   const handleKeyDown = (e) => {
 
     if (filteredBooks.length === 0) return;
 
-    if (smartBookSearch.books.length > 0) {
-      // Smart search mode keyboard handling
+    if (hasSmartMatches) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedBookIndex(prev =>
-          prev < smartBookSearch.books.length - 1 ? prev + 1 : 0
-        );
+        const next = selectedMatchIndex < filteredBooks.length - 1 ? selectedMatchIndex + 1 : 0;
+        setSelectedMatchIndex(next);
+        scrollToIndex(next);
         return;
-      } else if (e.key === 'ArrowUp') {
+      }
+      if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setSelectedBookIndex(prev =>
-          prev > 0 ? prev - 1 : smartBookSearch.books.length - 1
-        );
+        const next = selectedMatchIndex > 0 ? selectedMatchIndex - 1 : filteredBooks.length - 1;
+        setSelectedMatchIndex(next);
+        scrollToIndex(next);
         return;
-      } else if (e.key === 'Tab') {
+      }
+      if (e.key === 'Tab') {
         e.preventDefault();
-        if (smartBookSearch.suggestion && smartBookSearch.books.length > 0) {
+        if (smartBookSearch.suggestion) {
           setSearchTerm(smartBookSearch.suggestion);
         }
         return;
-      } else if (e.key === 'ArrowRight') {
+      }
+      if (e.key === 'ArrowRight') {
         const inputEl = searchInputRef.current;
         const selectionStart = inputEl?.selectionStart ?? searchTerm.length;
         const selectionEnd = inputEl?.selectionEnd ?? searchTerm.length;
@@ -255,7 +301,8 @@ export default function BibleList() {
           }, 0);
           return;
         }
-      } else if (e.key === 'Enter') {
+      }
+      if (e.key === 'Enter') {
         e.preventDefault();
         handleSmartNavigation();
         return;
@@ -335,7 +382,7 @@ export default function BibleList() {
     const value = e.target.value;
     setSearchTerm(value);
     setSelectedIndex(-1);
-    setSelectedBookIndex(0); // Reset smart search selection
+    setSelectedMatchIndex(0);
 
     if (!value.trim()) {
       setAutoExpandMode(false);
@@ -344,7 +391,7 @@ export default function BibleList() {
   };
 
   const handleBookPress = async (book) => {
-    console.log('Book pressed:', book);
+    // console.log('Book pressed:', book);
     setLoading(true);
 
     try {
@@ -352,6 +399,7 @@ export default function BibleList() {
       console.log('Book data loaded:', bookData);
       setActiveBook(book);
       setActiveBookData(bookData);
+      setActiveChapter(1);
     } catch (error) {
       console.error('Error loading book data:', error);
     } finally {
@@ -461,25 +509,37 @@ export default function BibleList() {
           </div>
         </div>
 
-        <div className='overflow-y-scroll flex-1 dark-scroll flex flex-col'>
+        <div className='overflow-y-scroll flex-1 dark-scroll flex flex-col' ref={listRef}>
           {filteredBooks.map((book, index) => (
             <ListBook
               key={index}
-              ref={selectedIndex === index ? selectedBookRef : null}
+              ref={(selectedIndex === index || (hasSmartMatches && index === selectedMatchIndex)) ? selectedBookRef : null}
               data={book}
-              onPress={smartBookSearch.books.length > 0 ? () => {
+              onPress={hasSmartMatches ? () => {
                 setSelectedIndex(index);
+                setSelectedMatchIndex(index);
                 handleSmartNavigation();
               } : handleBookPress}
               onChapterPress={handleChapterPress}
               isActive={activeBook?.id === book.id}
               isSelected={selectedIndex === index}
-              isSmartSelected={smartBookSearch.books.length > 0 && index === selectedBookIndex}
+              isSmartSelected={hasSmartMatches && index === selectedMatchIndex}
               selectedIndex={selectedIndex}
               setSelectedIndex={setSelectedIndex}
               bookIndex={index}
-              forceExpanded={autoExpandMode && selectedIndex === index}
-              forceCollapsed={autoExpandMode && lastExpandedIndex !== index}
+              forceExpanded={
+                (autoExpandMode && selectedIndex === index) ||
+                (hasSmartMatches && smartBookSearch.chapter && index === selectedMatchIndex)
+              }
+              forceCollapsed={
+                (autoExpandMode && lastExpandedIndex !== index) ||
+                (hasSmartMatches && smartBookSearch.chapter && index !== selectedMatchIndex)
+              }
+              highlightChapter={
+                hasSmartMatches && smartBookSearch.chapter && index === selectedMatchIndex
+                  ? smartBookSearch.chapter
+                  : null
+              }
             />
           ))}
         </div>
